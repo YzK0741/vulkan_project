@@ -371,6 +371,11 @@ class vulkan_runtime {
     VkSampler texture_sampler = VK_NULL_HANDLE;
     VkDescriptorSet descriptor_set = VK_NULL_HANDLE;  // 添加描述符集
 
+    // 管线相关
+    VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
+    VkPipeline graphics_pipeline = VK_NULL_HANDLE;
+    std::vector<VkPipeline> per_mesh_pipelines;  // 每个网格的管线
+
     std::vector<uint8_t> saved_texture_pixels; // 保存原始像素数据
     uint32_t saved_texture_width = 0;
     uint32_t saved_texture_height = 0;
@@ -444,6 +449,183 @@ class vulkan_runtime {
         vkUpdateDescriptorSets(core.device, descriptor_writes.size(), descriptor_writes.data(), 0, nullptr);
     }
 
+    // 创建管线布局
+    void create_pipeline_layout() {
+        VkPipelineLayoutCreateInfo pipeline_layout_info = {};
+        pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipeline_layout_info.setLayoutCount = 1;
+        pipeline_layout_info.pSetLayouts = &core.descriptor_set_layout;
+        pipeline_layout_info.pushConstantRangeCount = 0;
+        pipeline_layout_info.pPushConstantRanges = nullptr;
+
+        if (vkCreatePipelineLayout(core.device, &pipeline_layout_info, nullptr, &pipeline_layout) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create pipeline layout!");
+        }
+    }
+
+    // 为特定网格创建管线
+    [[nodiscard]] VkPipeline create_mesh_pipeline() {
+        // 1. 验证核心对象
+        if (core.device == VK_NULL_HANDLE) {
+                throw std::runtime_error("Vulkan device is not initialized");
+        }
+
+        if (core.swap_chain_extent.width == 0 || core.swap_chain_extent.height == 0) {
+                throw std::runtime_error("Swap chain extent is invalid");
+        }
+
+        if (core.renderpass == VK_NULL_HANDLE) {
+                throw std::runtime_error("Render pass is not initialized");
+        }
+
+        this->pipeline_layout = this->core.pipeline_layout;
+        if (pipeline_layout == VK_NULL_HANDLE) {
+            throw std::runtime_error("Pipeline layout is not initialized");
+        }
+
+        // 使用全局的顶点输入描述（与vertex结构匹配）
+        auto binding_description = vertex::get_binding_descriptions();
+        auto attribute_descriptions = vertex::get_attribute_descriptions();
+
+        VkPipelineVertexInputStateCreateInfo vertex_input_info{};
+        vertex_input_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        vertex_input_info.vertexBindingDescriptionCount = static_cast<uint32_t>(binding_description.size());
+        vertex_input_info.pVertexBindingDescriptions = binding_description.data();
+        vertex_input_info.vertexAttributeDescriptionCount = static_cast<uint32_t>(attribute_descriptions.size());
+        vertex_input_info.pVertexAttributeDescriptions = attribute_descriptions.data();
+
+        // 读取并创建着色器模块
+        VkShaderModule vert_shader_module = VK_NULL_HANDLE;
+        VkShaderModule frag_shader_module = VK_NULL_HANDLE;
+
+        try {
+            auto vert_shader_code = read_file("vert.spv");
+            auto frag_shader_code = read_file("frag.spv");
+
+            if (vert_shader_code.empty() || frag_shader_code.empty()) {
+                throw std::runtime_error("着色器文件为空");
+            }
+
+            vert_shader_module = create_shader_module(vert_shader_code, core.device);
+            frag_shader_module = create_shader_module(frag_shader_code, core.device);
+        } catch (const std::exception& e) {
+            std::cout << "着色器文件加载失败: " << e.what() << std::endl;
+            throw std::runtime_error("着色器文件缺失，请先编译着色器");
+        }
+
+        VkPipelineShaderStageCreateInfo vert_shader_stage_info{};
+        vert_shader_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        vert_shader_stage_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
+        vert_shader_stage_info.module = vert_shader_module;
+        vert_shader_stage_info.pName = "main";
+
+        VkPipelineShaderStageCreateInfo frag_shader_stage_info{};
+        frag_shader_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        frag_shader_stage_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        frag_shader_stage_info.module = frag_shader_module;
+        frag_shader_stage_info.pName = "main";
+
+        VkPipelineShaderStageCreateInfo shaderStages[] = {vert_shader_stage_info, frag_shader_stage_info};
+
+        // 输入装配状态
+        VkPipelineInputAssemblyStateCreateInfo input_assembly{};
+        input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        input_assembly.primitiveRestartEnable = VK_FALSE;
+
+        // 视口和裁剪
+        VkViewport viewport{};
+        viewport.x = 0.0f;
+        viewport.y = 0.0f;
+        viewport.width = static_cast<float>(core.swap_chain_extent.width);
+        viewport.height = static_cast<float>(core.swap_chain_extent.height);
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+
+        VkRect2D scissor{};
+        scissor.offset = {0, 0};
+        scissor.extent = core.swap_chain_extent;
+
+        VkPipelineViewportStateCreateInfo viewport_state{};
+        viewport_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        viewport_state.viewportCount = 1;
+        viewport_state.pViewports = &viewport;
+        viewport_state.scissorCount = 1;
+        viewport_state.pScissors = &scissor;
+
+        // 光栅化状态
+        VkPipelineRasterizationStateCreateInfo rasterizer{};
+        rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        rasterizer.depthClampEnable = VK_FALSE;
+        rasterizer.rasterizerDiscardEnable = VK_FALSE;
+        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterizer.lineWidth = 1.0f;
+        rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+        rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        rasterizer.depthBiasEnable = VK_FALSE;
+
+        // 多重采样状态
+        VkPipelineMultisampleStateCreateInfo multisampling{};
+        multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        multisampling.sampleShadingEnable = VK_FALSE;
+        multisampling.rasterizationSamples = core.msaa_samples;
+        multisampling.minSampleShading = 1.0f;
+        multisampling.pSampleMask = nullptr;
+        multisampling.alphaToCoverageEnable = VK_FALSE;
+        multisampling.alphaToOneEnable = VK_FALSE;
+
+        // 颜色混合状态
+        VkPipelineColorBlendAttachmentState color_blend_attachment{};
+        color_blend_attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+            VK_COLOR_COMPONENT_G_BIT |
+                VK_COLOR_COMPONENT_B_BIT |
+                    VK_COLOR_COMPONENT_A_BIT;
+        color_blend_attachment.blendEnable = VK_FALSE;
+
+        VkPipelineColorBlendStateCreateInfo color_blending{};
+        color_blending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        color_blending.logicOpEnable = VK_FALSE;
+        color_blending.attachmentCount = 1;
+        color_blending.pAttachments = &color_blend_attachment;
+
+        // 深度测试
+        VkPipelineDepthStencilStateCreateInfo depthStencil{};
+        depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        depthStencil.depthTestEnable = VK_TRUE;
+        depthStencil.depthWriteEnable = VK_TRUE;
+        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+        depthStencil.depthBoundsTestEnable = VK_FALSE;
+        depthStencil.stencilTestEnable = VK_FALSE;
+
+        // 创建管线
+        VkGraphicsPipelineCreateInfo pipeline_info = {};
+        pipeline_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipeline_info.stageCount = 2;
+        pipeline_info.pStages = shaderStages;
+        pipeline_info.pVertexInputState = &vertex_input_info;
+        pipeline_info.pInputAssemblyState = &input_assembly;
+        pipeline_info.pViewportState = &viewport_state;
+        pipeline_info.pRasterizationState = &rasterizer;
+        pipeline_info.pMultisampleState = &multisampling;
+        pipeline_info.pColorBlendState = &color_blending;
+        pipeline_info.pDepthStencilState = &depthStencil;
+        pipeline_info.layout = pipeline_layout;
+        pipeline_info.renderPass = core.renderpass;
+        pipeline_info.subpass = 0;
+        pipeline_info.basePipelineHandle = VK_NULL_HANDLE;
+
+        VkPipeline pipeline;
+        if (vkCreateGraphicsPipelines(core.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create graphics pipeline!");
+        }
+
+        // 清理着色器模块
+        vkDestroyShaderModule(core.device, vert_shader_module, nullptr);
+        vkDestroyShaderModule(core.device, frag_shader_module, nullptr);
+
+        return pipeline;
+    }
+
 public:
     vulkan_runtime()
         : core(),
@@ -453,13 +635,25 @@ public:
               // 初始化描述符集
         create_descriptor_sets();
         create_uniform_buffers();
+
+        // 创建单一的全局管线
+        graphics_pipeline = create_mesh_pipeline();
+        create_pipeline_layout();
     }
 
     void add_mesh(const std::vector<glm::vec3>& positions,
                     const std::vector<glm::vec3>& normals,
                     const std::vector<glm::vec2>& tex_coords,  // 纹理坐标
                     const std::vector<uint32_t>& indexes) {
-        this->meshes.emplace_back(this->core, positions, normals, tex_coords, indexes);
+        auto new_mesh = vulkan_mesh_buffer(this->core, positions, normals, tex_coords, indexes);
+        this->meshes.push_back(std::move(new_mesh));
+
+        // 创建纹理资源（如果需要）
+        if (const stb_texture texture = create_default_texture(); texture.pixels && texture.width > 0 && texture.height > 0) {
+            create_texture_from_stb(texture);
+            update_descriptor_sets();  // 更新描述符集
+            std::cout << "纹理资源创建成功，尺寸: " << texture.width << "x" << texture.height << std::endl;
+        }
     }
 
 
@@ -548,64 +742,7 @@ public:
         set_buffer(positions, tex_coords, indexes, default_texture);
     }
 
-    // 版本3：使用uint32_t索引 - 修正版
-    /*void set_buffer(const std::vector<glm::vec3>& positions,
-                    const std::vector<glm::vec2>& tex_coords,
-                    const std::vector<uint32_t>& indexes) {
-        std::cout << "this is indexes" << std::endl;
-        for (int i = 0; i < std::min(10, (int)indexes.size()); i++)
-            std::cout << indexes[i] << std::endl;
-
-        // 检查输入是否有效
-        if (positions.size() != tex_coords.size()) {
-            throw std::runtime_error("顶点位置和纹理坐标数量不匹配");
-        }
-
-        // 创建完整的顶点数据
-        std::vector<vertex> vertices;
-        vertices.reserve(positions.size());
-
-        for (size_t i = 0; i < positions.size(); ++i) {
-            vertex v{};
-            v.position = positions[i];
-            v.tex_coord = tex_coords[i];
-            v.normal = glm::vec3(0.0f, 0.0f, 1.0f);
-            vertices.push_back(v);
-        }
-
-        // 创建顶点缓冲区
-        if (!vertices.empty()) {
-            auto result = creator.create_vertex_buffer(vertices);
-            vertex_buffer.set(result.buffer, result.memory,
-                            vertices.size() * sizeof(vertex), core.device);
-            std::cout << "顶点缓冲区创建成功，大小: " << vertices.size() << " 个顶点" << std::endl;
-        } else {
-            vertex_buffer.cleanup();
-        }
-
-        // 创建索引缓冲区（使用uint32_t）
-        if (!indexes.empty()) {
-            auto result = creator.create_index_buffer(indexes);
-            index_buffer.set(result.buffer, result.memory,
-                           indexes.size() * sizeof(uint32_t), core.device);
-            index_count = static_cast<uint32_t>(indexes.size());
-            std::cout << "索引缓冲区创建成功，大小: " << indexes.size() << " 个索引" << std::endl;
-        } else {
-            index_buffer.cleanup();
-            index_count = 0;
-        }
-
-        // 创建默认纹理
-        stb_texture default_texture = create_default_texture();
-        create_texture_from_stb(default_texture);
-        update_descriptor_sets();  // ✅ 确保更新描述符集
-        std::cout << "默认纹理创建并绑定成功" << std::endl;
-    }*/
     void update_uniform_buffer(uint32_t current_image) const {
-        //static auto start_time = std::chrono::high_resolution_clock::now();
-        //auto current_time = std::chrono::high_resolution_clock::now();
-        //float time = std::chrono::duration<float, std::chrono::seconds::period>(current_time - start_time).count();
-
         uniform_buffer_object ubo{};
 
         // 1. 模型矩阵：根据您的模型大小调整
@@ -616,19 +753,14 @@ public:
         ubo.model = glm::scale(ubo.model, glm::vec3(3.0f, 3.0f, 3.0f));  // 缩放
 
         // 修正旋转：将模型的Z轴向上转为Y轴向上
-        // 这通常需要绕X轴旋转-90度
         ubo.model = glm::rotate(ubo.model, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.1f));
 
         // 2. 向下平移（注意坐标系方向！）
-        // 在Vulkan/OpenGL中：Y轴向上为正，向下为负
-        // X轴向右为正，向左为负
-        // Z轴向屏幕外为正，向屏幕内为负
         ubo.model = glm::translate(ubo.model, glm::vec3(0.0f, -1.0f, 0.0f));  // 向下移动1个单位
 
         ubo.model = glm::rotate(ubo.model, angle, glm::vec3(0.0f, 1.0f, 0.0f));  // 持续旋转
 
         // 2. 视图矩阵：调整相机位置
-        // 首先计算模型的大致中心（假设模型在原点附近）
         ubo.view = glm::lookAt(
             glm::vec3(3.0f, 3.0f, 3.0f),  // 相机位置
             glm::vec3(0.0f, 0.0f, 0.0f),  // 观察目标
@@ -820,8 +952,8 @@ public:
         // 4. 更新Uniform Buffer
         update_uniform_buffer(image_index);
 
-        // 4. 记录命令缓冲区
-        bind_mesh_to_command_buffer(image_index);
+        // 4. 记录命令缓冲区 - 使用mesh渲染
+        record_command_buffer_with_meshes(image_index);
 
         // 5. 提交并呈现
         core.submit_cmd_buffer();
@@ -1083,9 +1215,7 @@ private:
         VkImageCreateInfo image_info{};
         image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         image_info.imageType = VK_IMAGE_TYPE_2D;
-        image_info.extent.width = width;
-        image_info.extent.height = height;
-        image_info.extent.depth = 1;
+        image_info.extent = { width, height, 1 };
         image_info.mipLevels = 1;
         image_info.arrayLayers = 1;
         image_info.format = format;
@@ -1096,7 +1226,8 @@ private:
         image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         if (vkCreateImage(device, &image_info, nullptr, &image) != VK_SUCCESS) {
-            throw std::runtime_error("无法创建纹理图像!");
+            vkDestroyImage(device, image, nullptr);
+            throw std::runtime_error("failed to create texture image!");
         }
 
         VkMemoryRequirements mem_requirements;
@@ -1112,7 +1243,7 @@ private:
         );
 
         if (vkAllocateMemory(device, &alloc_info, nullptr, &image_memory) != VK_SUCCESS) {
-            throw std::runtime_error("无法分配纹理图像内存!");
+            throw std::runtime_error("failed to allocate texture image memory!");
         }
 
         vkBindImageMemory(device, image, image_memory, 0);
@@ -1344,12 +1475,12 @@ private:
         vkCmdBeginRenderPass(cmd_buffer, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
 
         // 2. 绑定管线
-        vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, core.graphics_pipeline);
+        vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline);
 
         // 3. 绑定描述符集 - 修复绑定位置
         if (descriptor_set != VK_NULL_HANDLE) {
             vkCmdBindDescriptorSets(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                  core.pipeline_layout, 0, 1, &descriptor_set, 0, nullptr);
+                                  pipeline_layout, 0, 1, &descriptor_set, 0, nullptr);
         }
 
         // 4. 绑定顶点缓冲区 - 确保使用正确的偏移量
@@ -1378,7 +1509,6 @@ private:
 
         // 6. 绘制命令 - 关键：使用索引绘制
         if (index_buffer && index_count > 0) {
-            //std::cout << "使用索引绘制: " << index_count << " 个索引" << std::endl;
             vkCmdBindIndexBuffer(cmd_buffer, *index_buffer, 0, VK_INDEX_TYPE_UINT32);
             vkCmdDrawIndexed(cmd_buffer, index_count, 1, 0, 0, 0);
         } else if (vertex_buffer) {
@@ -1397,7 +1527,7 @@ private:
         }
     }
 
-    void bind_mesh_to_command_buffer(const uint32_t image_index) const {
+    void record_command_buffer_with_meshes(const uint32_t image_index) const {
         const VkCommandBuffer cmd_buffer = core.command_buffers[core.current_frame];
 
         VkCommandBufferBeginInfo begin_info{};
@@ -1425,8 +1555,8 @@ private:
 
         vkCmdBeginRenderPass(cmd_buffer, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
 
-        // 2. 绑定管线
-        vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, core.graphics_pipeline);
+        // 2. 绑定管线 - 使用全局管线
+        vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline);
 
         // 3. 设置视口和裁剪
         VkViewport viewport{};
@@ -1446,11 +1576,14 @@ private:
         // 4. 绑定描述符集
         if (descriptor_set != VK_NULL_HANDLE) {
             vkCmdBindDescriptorSets(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                  core.pipeline_layout, 0, 1, &descriptor_set, 0, nullptr);
+                                  pipeline_layout, 0, 1, &descriptor_set, 0, nullptr);
         }
 
-        // 5. 绘制所有 mesh
-        for (const auto& mesh : this->meshes) {
+        // 5. 绘制所有网格
+        for (size_t i = 0; i < this->meshes.size(); i++) {
+            const auto& mesh = this->meshes[i];
+
+            // 绑定当前网格的缓冲区
             mesh.bind(cmd_buffer);  // 统一绑定顶点和索引缓冲区
 
             if (mesh.has_indices()) {
@@ -1485,6 +1618,14 @@ public:
 
     // 析构函数清理资源
     ~vulkan_runtime() {
+        // 清理管线
+        if (graphics_pipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(core.device, graphics_pipeline, nullptr);
+        }
+        if (pipeline_layout != VK_NULL_HANDLE) {
+            vkDestroyPipelineLayout(core.device, pipeline_layout, nullptr);
+        }
+
         cleanup_texture_resources();
     }
     // 在 vulkan_runtime.h 中添加测试函数
@@ -1504,6 +1645,11 @@ public:
             {0.5f, -0.5f, -0.5f},  // 5
             {0.5f, 0.5f, -0.5f},   // 6
             {-0.5f, 0.5f, -0.5f}   // 7
+        };
+
+        std::vector<glm::vec3> normals = {
+            {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, // 前面
+            {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f, -1.0f} // 后面
         };
 
         std::vector<glm::vec2> tex_coords = {
@@ -1538,7 +1684,7 @@ public:
                       << indices[i] << ", " << indices[i+1] << ", " << indices[i+2] << std::endl;
         }
 
-        set_buffer(positions, tex_coords, indices);
+        add_mesh(positions, normals, tex_coords, indices);
     }
 };
 

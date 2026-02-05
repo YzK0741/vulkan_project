@@ -57,7 +57,7 @@ int main() {
         if (use_obj) {
             // 尝试加载OBJ文件
             try {
-                const auto module = obj_loader::load_from_file("adm.obj");
+                const auto module = obj_loader::load_from_file("room.obj");
 
                 // 验证数据
                 if (module.vertices.empty() || module.indices.empty()) {
@@ -80,10 +80,10 @@ int main() {
                 positions.reserve(module.vertices.size());
                 tex_coords.reserve(module.vertices.size());
 
-                for (const auto&[position, normal, tex_coord] : module.vertices) {
-                    positions.push_back(position);
-                    normals.push_back(normal);
-                    tex_coords.push_back(tex_coord);
+                for (const auto& vertex : module.vertices) {
+                    positions.push_back(vertex.position);
+                    normals.push_back(vertex.normal);
+                    tex_coords.push_back(vertex.tex_coord);
                 }
 
                 runtime.add_mesh(positions, normals, tex_coords, module.indices);

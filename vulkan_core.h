@@ -1170,11 +1170,10 @@ struct vulkan_core {
             this->create_renderpass();       // ✅ 先创建渲染通道
             std::cout << "渲染通道创建完成" << std::endl;
 
-            this->create_graphics_pipeline(); // 创建图形管线
-            std::cout << "图形管线创建完成" << std::endl;
-
             this->create_framebuffers();      // ✅ 现在可以创建帧缓冲区了
             std::cout << "帧缓冲区创建完成" << std::endl;
+
+            this->create_graphics_pipeline();
 
             this->create_command_pool();
             std::cout << "命令池创建完成" << std::endl;
@@ -1311,36 +1310,88 @@ struct vulkan_core {
         const VkBuffer& source,
         const VkBuffer& destination,
         const VkDeviceSize size) const {
-        VkCommandBufferAllocateInfo allocate_info;
+
+        // 1. 验证成员变量有效性
+        if (this->device == VK_NULL_HANDLE) {
+            throw std::runtime_error("Vulkan device is not initialized");
+        }
+
+        if (this->command_pool == VK_NULL_HANDLE) {
+            throw std::runtime_error("Command pool is not initialized");
+        }
+
+        if (this->graphics_queue == VK_NULL_HANDLE) {
+            throw std::runtime_error("Graphics queue is not initialized");
+        }
+
+        // 2. 完全初始化的分配信息结构体
+        VkCommandBufferAllocateInfo allocate_info{};
         allocate_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocate_info.pNext = nullptr;
         allocate_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocate_info.commandPool = this->command_pool;
         allocate_info.commandBufferCount = 1;
 
-        VkCommandBuffer command_buffer;
-        vkAllocateCommandBuffers(this->device, &allocate_info, &command_buffer);
+        VkCommandBuffer command_buffer = VK_NULL_HANDLE;
+        VkResult result = vkAllocateCommandBuffers(this->device, &allocate_info, &command_buffer);
 
-        VkCommandBufferBeginInfo begin_info;
+        if (result != VK_SUCCESS) {
+            throw std::runtime_error("Failed to allocate command buffer for buffer copy");
+        }
+
+        // 3. 完全初始化的开始信息结构体
+        VkCommandBufferBeginInfo begin_info{};
         begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin_info.pNext = nullptr;
         begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        begin_info.pInheritanceInfo = nullptr;
 
-        vkBeginCommandBuffer(command_buffer, &begin_info);
+        result = vkBeginCommandBuffer(command_buffer, &begin_info);
+        if (result != VK_SUCCESS) {
+            vkFreeCommandBuffers(this->device, this->command_pool, 1, &command_buffer);
+            throw std::runtime_error("Failed to begin command buffer");
+        }
 
-        VkBufferCopy buffer_copy;
-        buffer_copy.dstOffset = 0;
+        // 4. 完全初始化的缓冲区拷贝结构体
+        VkBufferCopy buffer_copy{};
         buffer_copy.srcOffset = 0;
+        buffer_copy.dstOffset = 0;
         buffer_copy.size = size;
+
         vkCmdCopyBuffer(command_buffer, source, destination, 1, &buffer_copy);
 
-        vkEndCommandBuffer(command_buffer);
+        result = vkEndCommandBuffer(command_buffer);
+        if (result != VK_SUCCESS) {
+            vkFreeCommandBuffers(this->device, this->command_pool, 1, &command_buffer);
+            throw std::runtime_error("Failed to end command buffer");
+        }
 
-        VkSubmitInfo submit_info;
+        // 5. 完全初始化的提交信息结构体
+        VkSubmitInfo submit_info{};
         submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.pNext = nullptr;
+        submit_info.waitSemaphoreCount = 0;
+        submit_info.pWaitSemaphores = nullptr;
+        submit_info.pWaitDstStageMask = nullptr;
         submit_info.commandBufferCount = 1;
         submit_info.pCommandBuffers = &command_buffer;
-        vkQueueSubmit(this->graphics_queue, 1, &submit_info, VK_NULL_HANDLE);
+        submit_info.signalSemaphoreCount = 0;
+        submit_info.pSignalSemaphores = nullptr;
 
-        vkQueueWaitIdle(this->graphics_queue);
+        result = vkQueueSubmit(this->graphics_queue, 1, &submit_info, VK_NULL_HANDLE);
+        if (result != VK_SUCCESS) {
+            vkFreeCommandBuffers(this->device, this->command_pool, 1, &command_buffer);
+            throw std::runtime_error("Failed to submit copy command to queue");
+        }
+
+        // 6. 等待队列完成
+        result = vkQueueWaitIdle(this->graphics_queue);
+        if (result != VK_SUCCESS) {
+            vkFreeCommandBuffers(this->device, this->command_pool, 1, &command_buffer);
+            throw std::runtime_error("Failed to wait for queue idle");
+        }
+
+        // 7. 清理命令缓冲区
         vkFreeCommandBuffers(this->device, this->command_pool, 1, &command_buffer);
     }
     /* void draw_frame() {
