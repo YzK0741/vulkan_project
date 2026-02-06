@@ -1269,43 +1269,6 @@ struct vulkan_core {
         current_frame = (current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
-
-    void create_buffer(
-        const VkDeviceSize size,
-        const VkBufferUsageFlags usage,
-        const VkMemoryPropertyFlags properties,
-        VkBuffer& buffer,
-        VkDeviceMemory& buffer_memory
-    ) const {
-        VkBufferCreateInfo buffer_info{};
-        buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        buffer_info.size = size;
-        buffer_info.usage = usage;
-        buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        if (vkCreateBuffer(device, &buffer_info, nullptr, &buffer) != VK_SUCCESS) {
-            throw std::runtime_error("无法创建缓冲区!");
-        }
-
-        VkMemoryRequirements mem_requirements;
-        vkGetBufferMemoryRequirements(device, buffer, &mem_requirements);
-
-        VkMemoryAllocateInfo alloc_info{};
-        alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        alloc_info.allocationSize = mem_requirements.size;
-        alloc_info.memoryTypeIndex = find_memory_type(
-            mem_requirements.memoryTypeBits,
-            properties,
-            physical_device
-        );
-
-        if (vkAllocateMemory(device, &alloc_info, nullptr, &buffer_memory) != VK_SUCCESS) {
-            throw std::runtime_error("无法分配缓冲区内存!");
-        }
-
-        vkBindBufferMemory(device, buffer, buffer_memory, 0);
-    }
-
     void copy_buffer(
         const VkBuffer& source,
         const VkBuffer& destination,

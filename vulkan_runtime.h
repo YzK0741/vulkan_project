@@ -10,12 +10,17 @@
 #include "vulkan_core.h"
 #include "vulkan_utility.h"
 #include "png_loader.h"
+#include "vulkan_buffer.h"
 
+// vulkan_runtime.h 中的 vulkan_mesh_buffer 类的完整修复版本
 struct vulkan_mesh_buffer {
 private:
     std::reference_wrapper<const vulkan_core> core_ref;
     size_t vertex_count = 0;
-    size_t index_count = 0;  // 添加索引计数
+    size_t index_count = 0;
+
+    // 交错顶点结构，与vertex结构保持一致
+    using interleaved_vertex = vertex;
 
     template <typename T>
     static void create_buffer_from_vector(
@@ -88,22 +93,17 @@ private:
             }
         };
 
-        destroy_buffer(position_buffer, position_memory);
-        destroy_buffer(normal_buffer, normal_memory);
-        destroy_buffer(tex_coord_buffer, tex_coord_memory);
+        destroy_buffer(interleaved_vertex_buffer, interleaved_vertex_memory);
         destroy_buffer(index_buffer, index_memory);
     }
 
 public:
-    VkBuffer position_buffer = VK_NULL_HANDLE;
-    VkDeviceMemory position_memory = VK_NULL_HANDLE;
-    VkBuffer normal_buffer = VK_NULL_HANDLE;
-    VkDeviceMemory normal_memory = VK_NULL_HANDLE;
-    VkBuffer tex_coord_buffer = VK_NULL_HANDLE;
-    VkDeviceMemory tex_coord_memory = VK_NULL_HANDLE;
+    // 交错顶点缓冲区（包含所有顶点属性）
+    VkBuffer interleaved_vertex_buffer = VK_NULL_HANDLE;
+    VkDeviceMemory interleaved_vertex_memory = VK_NULL_HANDLE;
     VkBuffer index_buffer = VK_NULL_HANDLE;
     VkDeviceMemory index_memory = VK_NULL_HANDLE;
-    VkIndexType index_type = VK_INDEX_TYPE_UINT32;  // 添加索引类型
+    VkIndexType index_type = VK_INDEX_TYPE_UINT32;
 
     // 禁止复制
     vulkan_mesh_buffer(const vulkan_mesh_buffer&) = delete;
@@ -114,12 +114,8 @@ public:
         : core_ref(other.core_ref)
         , vertex_count(other.vertex_count)
         , index_count(other.index_count)
-        , position_buffer(std::exchange(other.position_buffer, VK_NULL_HANDLE))
-        , position_memory(std::exchange(other.position_memory, VK_NULL_HANDLE))
-        , normal_buffer(std::exchange(other.normal_buffer, VK_NULL_HANDLE))
-        , normal_memory(std::exchange(other.normal_memory, VK_NULL_HANDLE))
-        , tex_coord_buffer(std::exchange(other.tex_coord_buffer, VK_NULL_HANDLE))
-        , tex_coord_memory(std::exchange(other.tex_coord_memory, VK_NULL_HANDLE))
+        , interleaved_vertex_buffer(std::exchange(other.interleaved_vertex_buffer, VK_NULL_HANDLE))
+        , interleaved_vertex_memory(std::exchange(other.interleaved_vertex_memory, VK_NULL_HANDLE))
         , index_buffer(std::exchange(other.index_buffer, VK_NULL_HANDLE))
         , index_memory(std::exchange(other.index_memory, VK_NULL_HANDLE))
         , index_type(other.index_type) {
@@ -134,12 +130,8 @@ public:
             vertex_count = other.vertex_count;
             index_count = other.index_count;
 
-            position_buffer = std::exchange(other.position_buffer, VK_NULL_HANDLE);
-            position_memory = std::exchange(other.position_memory, VK_NULL_HANDLE);
-            normal_buffer = std::exchange(other.normal_buffer, VK_NULL_HANDLE);
-            normal_memory = std::exchange(other.normal_memory, VK_NULL_HANDLE);
-            tex_coord_buffer = std::exchange(other.tex_coord_buffer, VK_NULL_HANDLE);
-            tex_coord_memory = std::exchange(other.tex_coord_memory, VK_NULL_HANDLE);
+            interleaved_vertex_buffer = std::exchange(other.interleaved_vertex_buffer, VK_NULL_HANDLE);
+            interleaved_vertex_memory = std::exchange(other.interleaved_vertex_memory, VK_NULL_HANDLE);
             index_buffer = std::exchange(other.index_buffer, VK_NULL_HANDLE);
             index_memory = std::exchange(other.index_memory, VK_NULL_HANDLE);
             index_type = other.index_type;
@@ -147,7 +139,47 @@ public:
         return *this;
     }
 
-    // 构造函数1：带索引
+    // 构造函数：使用vertex结构的数组
+    template <typename IndexT>
+    explicit vulkan_mesh_buffer(vulkan_core& core,
+                                const std::vector<vertex>& vertices,
+                                const std::vector<IndexT>& indices)
+        : core_ref(core) {
+
+        if (vertices.empty()) {
+            throw std::invalid_argument("Vertices cannot be empty");
+        }
+
+        vertex_count = vertices.size();
+
+        // 设置索引类型
+        if constexpr (sizeof(IndexT) == 2) {
+            index_type = VK_INDEX_TYPE_UINT16;
+        } else if constexpr (sizeof(IndexT) == 4) {
+            index_type = VK_INDEX_TYPE_UINT32;
+        } else {
+            throw std::invalid_argument("Unsupported index type");
+        }
+
+        // 直接使用vertex结构创建交错顶点缓冲区
+        create_buffer_from_vector(core,
+            vertices,
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            this->interleaved_vertex_buffer,
+            this->interleaved_vertex_memory);
+
+        // 创建索引缓冲区
+        if (!indices.empty()) {
+            index_count = indices.size();
+            create_buffer_from_vector(core,
+                indices,
+                VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                this->index_buffer,
+                this->index_memory);
+        }
+    }
+
+    // 构造函数：使用分离的顶点属性数组，转换为交错布局
     template <typename PositionT, typename NormalT, typename TexCoordT, typename IndexT>
     explicit vulkan_mesh_buffer(vulkan_core& core,
                                 const std::vector<PositionT>& positions,
@@ -179,40 +211,48 @@ public:
             throw std::invalid_argument("Unsupported index type");
         }
 
-        // 创建缓冲区
+        // 将分离的顶点属性转换为交错vertex结构
+        std::vector<vertex> interleaved_vertices;
+        interleaved_vertices.reserve(vertex_count);
+
+        for (size_t i = 0; i < vertex_count; ++i) {
+            vertex v = {};
+            v.position = positions[i];  // 位置
+
+            if (!normals.empty()) {
+                v.normal = normals[i];  // 使用法线作为颜色
+            } else {
+                v.normal = glm::vec3(1.0f, 1.0f, 1.0f); // 默认颜色
+            }
+
+            if (!tex_coords.empty()) {
+                v.tex_coord = tex_coords[i];  // 纹理坐标
+            } else {
+                v.tex_coord = glm::vec2(0.0f, 0.0f); // 默认纹理坐标
+            }
+
+            interleaved_vertices.push_back(v);
+        }
+
+        // 创建交错顶点缓冲区
         create_buffer_from_vector(core,
-            positions,
+            interleaved_vertices,
             VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-            this->position_buffer,
-            this->position_memory);
+            this->interleaved_vertex_buffer,
+            this->interleaved_vertex_memory);
 
-        if (!normals.empty()) {
-            create_buffer_from_vector(core,
-                normals,
-                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                this->normal_buffer,
-                this->normal_memory);
-        }
-
-        if (!tex_coords.empty()) {
-            create_buffer_from_vector(core,
-                tex_coords,
-                VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                this->tex_coord_buffer,
-                this->tex_coord_memory);
-        }
-
+        // 创建索引缓冲区
         if (!indices.empty()) {
             index_count = indices.size();
             create_buffer_from_vector(core,
                 indices,
-                VK_BUFFER_USAGE_INDEX_BUFFER_BIT,  // 正确使用索引缓冲区标志
+                VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
                 this->index_buffer,
                 this->index_memory);
         }
     }
 
-    // 构造函数2：不带索引
+    // 构造函数：无索引版本
     template <typename PositionT, typename NormalT, typename TexCoordT>
     explicit vulkan_mesh_buffer(vulkan_core& core,
                                 const std::vector<PositionT>& positions,
@@ -229,31 +269,13 @@ public:
     [[nodiscard]] size_t get_vertex_count() const { return vertex_count; }
     [[nodiscard]] size_t get_index_count() const { return index_count; }
     [[nodiscard]] bool has_indices() const { return index_buffer != VK_NULL_HANDLE; }
-    [[nodiscard]] bool has_normals() const { return normal_buffer != VK_NULL_HANDLE; }
-    [[nodiscard]] bool has_tex_coords() const { return tex_coord_buffer != VK_NULL_HANDLE; }
 
-    // 绑定顶点缓冲区
+    // 绑定交错顶点缓冲区
     void bind_vertex_buffers(VkCommandBuffer command_buffer, uint32_t first_binding = 0) const {
-        std::vector<VkBuffer> buffers;
-        std::vector<VkDeviceSize> offsets;
-
-        if (position_buffer != VK_NULL_HANDLE) {
-            buffers.push_back(position_buffer);
-            offsets.push_back(0);
-        }
-        if (normal_buffer != VK_NULL_HANDLE) {
-            buffers.push_back(normal_buffer);
-            offsets.push_back(0);
-        }
-        if (tex_coord_buffer != VK_NULL_HANDLE) {
-            buffers.push_back(tex_coord_buffer);
-            offsets.push_back(0);
-        }
-
-        if (!buffers.empty()) {
-            vkCmdBindVertexBuffers(command_buffer, first_binding,
-                                  static_cast<uint32_t>(buffers.size()),
-                                  buffers.data(), offsets.data());
+        if (interleaved_vertex_buffer != VK_NULL_HANDLE) {
+            VkBuffer vertex_buffers[] = {interleaved_vertex_buffer};
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(command_buffer, first_binding, 1, vertex_buffers, offsets);
         }
     }
 
@@ -264,7 +286,7 @@ public:
         }
     }
 
-    // 统一绑定方法（推荐使用）
+    // 统一绑定方法
     void bind(VkCommandBuffer command_buffer, uint32_t first_vertex_binding = 0) const {
         bind_vertex_buffers(command_buffer, first_vertex_binding);
         if (has_indices()) {
@@ -296,64 +318,24 @@ public:
         }
     }
 
-    // 获取顶点绑定描述（用于创建管线）
+    // 获取顶点绑定描述（用于创建管线）- 使用与vertex结构匹配的描述
     struct vertex_binding_info {
         std::vector<VkVertexInputBindingDescription> bindings;
         std::vector<VkVertexInputAttributeDescription> attributes;
     };
 
-    [[nodiscard]] vertex_binding_info get_vertex_binding_info(const uint32_t start_binding = 0) const {
-        vertex_binding_info info;
-        uint32_t binding_index = start_binding;
 
-        // 位置（总是存在）
-        info.bindings.push_back({
-            binding_index,
-            sizeof(float) * 3,  // 假设是vec3，实际可能需要模板化
-            VK_VERTEX_INPUT_RATE_VERTEX
-        });
-        info.attributes.push_back({
-            0,  // location 0: position
-            binding_index,
-            VK_FORMAT_R32G32B32_SFLOAT,
-            0
-        });
-        binding_index++;
+};
 
-        // 法线（可选）
-        if (has_normals()) {
-            info.bindings.push_back({
-                binding_index,
-                sizeof(float) * 3,
-                VK_VERTEX_INPUT_RATE_VERTEX
-            });
-            info.attributes.push_back({
-                1,  // location 1: normal
-                binding_index,
-                VK_FORMAT_R32G32B32_SFLOAT,
-                0
-            });
-            binding_index++;
-        }
+struct vulkan_texture {
+    VkImage texture_image = VK_NULL_HANDLE;
+    VkDeviceMemory texture_image_memory = VK_NULL_HANDLE;
+    VkImageView texture_image_view = VK_NULL_HANDLE;
+    VkSampler texture_sampler = VK_NULL_HANDLE;
+};
 
-        // 纹理坐标（可选）
-        if (has_tex_coords()) {
-            info.bindings.push_back({
-                binding_index,
-                sizeof(float) * 2,  // 假设是vec2
-                VK_VERTEX_INPUT_RATE_VERTEX
-            });
-            info.attributes.push_back({
-                2,  // location 2: texcoord
-                binding_index,
-                VK_FORMAT_R32G32_SFLOAT,
-                0
-            });
-            binding_index++;
-        }
-
-        return info;
-    }
+struct vulkan_renderable_object {
+    vulkan_mesh_buffer mesh;
 };
 
 class vulkan_runtime {
@@ -374,7 +356,6 @@ class vulkan_runtime {
     // 管线相关
     VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
     VkPipeline graphics_pipeline = VK_NULL_HANDLE;
-    std::vector<VkPipeline> per_mesh_pipelines;  // 每个网格的管线
 
     std::vector<uint8_t> saved_texture_pixels; // 保存原始像素数据
     uint32_t saved_texture_width = 0;
@@ -1178,25 +1159,6 @@ private:
         }
 
         vkBindBufferMemory(device, buffer, buffer_memory, 0);
-    }
-
-    // 查找内存类型
-    static uint32_t find_memory_type(
-        VkPhysicalDevice physical_device,
-        uint32_t type_filter,
-        VkMemoryPropertyFlags properties
-    ) {
-        VkPhysicalDeviceMemoryProperties mem_properties;
-        vkGetPhysicalDeviceMemoryProperties(physical_device, &mem_properties);
-
-        for (uint32_t i = 0; i < mem_properties.memoryTypeCount; i++) {
-            if ((type_filter & (1 << i)) &&
-                (mem_properties.memoryTypes[i].propertyFlags & properties) == properties) {
-                return i;
-            }
-        }
-
-        throw std::runtime_error("无法找到合适的内存类型!");
     }
 
     // 创建纹理图像

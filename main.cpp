@@ -57,7 +57,7 @@ int main() {
         if (use_obj) {
             // 尝试加载OBJ文件
             try {
-                const auto module = obj_loader::load_from_file("room.obj");
+                const auto module = obj_loader::load_from_file("adm.obj");
 
                 // 验证数据
                 if (module.vertices.empty() || module.indices.empty()) {

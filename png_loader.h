@@ -9,13 +9,12 @@
 // PNG纹理加载器实现
 //
 
-#include <vector>
 #include <string>
 #include <stdexcept>
 #include <iostream>
 #include <vulkan/vulkan.h>
 #include <stb/stb_image.h>
-
+#include "vulkan_buffer.h"
 // PNG纹理数据结构
 struct png_texture_data {
     int width;
@@ -33,12 +32,12 @@ struct png_texture_data {
         }
     }
 
-    bool is_valid() const {
+    [[nodiscard]] bool is_valid() const {
         return pixel_data != nullptr && width > 0 && height > 0;
     }
 
     // 获取Vulkan格式
-    VkFormat get_vk_format() const {
+    [[nodiscard]] VkFormat get_vk_format() const {
         switch (channels) {
             case 1: return VK_FORMAT_R8_UNORM;           // 单通道
             case 2: return VK_FORMAT_R8G8_UNORM;         // RG双通道
@@ -228,63 +227,6 @@ public:
     }
 
 private:
-    // 通用缓冲区创建函数
-    static void create_buffer(
-        VkDevice device,
-        VkPhysicalDevice physical_device,
-        VkDeviceSize size,
-        VkBufferUsageFlags usage,
-        VkMemoryPropertyFlags properties,
-        VkBuffer& buffer,
-        VkDeviceMemory& buffer_memory
-    ) {
-        VkBufferCreateInfo buffer_info{};
-        buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        buffer_info.size = size;
-        buffer_info.usage = usage;
-        buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        if (vkCreateBuffer(device, &buffer_info, nullptr, &buffer) != VK_SUCCESS) {
-            throw std::runtime_error("无法创建缓冲区!");
-        }
-
-        VkMemoryRequirements mem_requirements;
-        vkGetBufferMemoryRequirements(device, buffer, &mem_requirements);
-
-        VkMemoryAllocateInfo alloc_info{};
-        alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        alloc_info.allocationSize = mem_requirements.size;
-        alloc_info.memoryTypeIndex = find_memory_type(
-            physical_device,
-            mem_requirements.memoryTypeBits,
-            properties
-        );
-
-        if (vkAllocateMemory(device, &alloc_info, nullptr, &buffer_memory) != VK_SUCCESS) {
-            throw std::runtime_error("无法分配缓冲区内存!");
-        }
-
-        vkBindBufferMemory(device, buffer, buffer_memory, 0);
-    }
-
-    // 查找内存类型
-    static uint32_t find_memory_type(
-        VkPhysicalDevice physical_device,
-        uint32_t type_filter,
-        VkMemoryPropertyFlags properties
-    ) {
-        VkPhysicalDeviceMemoryProperties mem_properties;
-        vkGetPhysicalDeviceMemoryProperties(physical_device, &mem_properties);
-
-        for (uint32_t i = 0; i < mem_properties.memoryTypeCount; i++) {
-            if ((type_filter & (1 << i)) &&
-                (mem_properties.memoryTypes[i].propertyFlags & properties) == properties) {
-                return i;
-            }
-        }
-
-        throw std::runtime_error("无法找到合适的内存类型!");
-    }
 
     // 创建纹理图像
     static void create_texture_image(
