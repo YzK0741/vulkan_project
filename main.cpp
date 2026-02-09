@@ -57,37 +57,52 @@ int main() {
         if (use_obj) {
             // 尝试加载OBJ文件
             try {
-                const auto module = obj_loader::load_from_file("adm.obj");
+                const auto module1 = obj_loader::load_from_file("adm.obj");
+                const auto module2 = obj_loader::load_from_file("room.obj");
+
 
                 // 验证数据
-                if (module.vertices.empty() || module.indices.empty()) {
+                if (module1.vertices.empty() || module1.indices.empty()) {
                     std::cerr << "OBJ数据为空，使用测试立方体" << std::endl;
                     throw std::runtime_error("OBJ数据为空");
                 }
 
                 // 检查索引有效性
-                for (const uint32_t idx : module.indices) {
-                    if (idx >= module.vertices.size()) {
+                for (const uint32_t idx : module1.indices) {
+                    if (idx >= module1.vertices.size()) {
                         std::cerr << "错误: 索引 " << idx << " 超出顶点范围!" << std::endl;
                         throw std::runtime_error("索引无效");
                     }
                 }
 
                 // 提取位置和纹理坐标
-                std::vector<glm::vec3> positions;
-                std::vector<glm::vec3> normals;
-                std::vector<glm::vec2> tex_coords;
-                positions.reserve(module.vertices.size());
-                tex_coords.reserve(module.vertices.size());
+                std::vector<glm::vec3> positions1;
+                std::vector<glm::vec3> normals1;
+                std::vector<glm::vec2> tex_coords1;
+                positions1.reserve(module1.vertices.size());
+                tex_coords1.reserve(module1.vertices.size());
 
-                for (const auto& vertex : module.vertices) {
-                    positions.push_back(vertex.position);
-                    normals.push_back(vertex.normal);
-                    tex_coords.push_back(vertex.tex_coord);
+                for (const auto& vertex : module1.vertices) {
+                    positions1.push_back(vertex.position);
+                    normals1.push_back(vertex.normal);
+                    tex_coords1.push_back(vertex.tex_coord);
                 }
 
-                runtime.add_mesh(positions, normals, tex_coords, module.indices);
-                //runtime.load_png_texture("bake.png");
+                std::vector<glm::vec3> positions2;
+                std::vector<glm::vec3> normals2;
+                std::vector<glm::vec2> tex_coords2;
+                positions2.reserve(module2.vertices.size());
+                tex_coords2.reserve(module2.vertices.size());
+
+                for (const auto& vertex : module2.vertices) {
+                    positions2.push_back(vertex.position);
+                    normals2.push_back(vertex.normal);
+                    tex_coords2.push_back(vertex.tex_coord);
+                }
+
+
+                //runtime.add_mesh(positions2, normals2, tex_coords2, module2.indices, "room.png");
+                runtime.add_mesh(positions1, normals1, tex_coords1, module1.indices);
                 std::cout << "OBJ模型加载成功!" << std::endl;
 
             } catch (const std::exception& e) {

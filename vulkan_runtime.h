@@ -5,7 +5,7 @@
 #ifndef VULKAN_PROJECT_VULKAN_RUNTIME_H
 #define VULKAN_PROJECT_VULKAN_RUNTIME_H
 
-#include <stb/stb_image_write.h>
+//#include <stb/stb_image_write.h>
 
 #include "vulkan_core.h"
 #include "vulkan_utility.h"
@@ -41,7 +41,9 @@ private:
         VkDeviceMemory staging_memory = VK_NULL_HANDLE;
 
         try {
-            core.create_buffer(
+            create_buffer(
+                core.device,
+                core.physical_device,
                 size,
                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -56,7 +58,9 @@ private:
             memcpy(mapped_data, data.data(), size);
             vkUnmapMemory(core.device, staging_memory);
 
-            core.create_buffer(
+            create_buffer(
+                core.device,
+                core.physical_device,
                 size,
                 VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage_flags,
                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
@@ -327,20 +331,152 @@ public:
 
 };
 
+// vulkan_runtime.h 中的纹理系统简化版实现
+
 struct vulkan_texture {
     VkImage texture_image = VK_NULL_HANDLE;
     VkDeviceMemory texture_image_memory = VK_NULL_HANDLE;
     VkImageView texture_image_view = VK_NULL_HANDLE;
     VkSampler texture_sampler = VK_NULL_HANDLE;
+    uint32_t width = 0;
+    uint32_t height = 0;
+
+    [[nodiscard]] bool is_valid() const {
+        return texture_image != VK_NULL_HANDLE &&
+               texture_image_view != VK_NULL_HANDLE &&
+               texture_sampler != VK_NULL_HANDLE;
+    }
+
+    // 将纹理更新到描述符集
+    void update_to_descriptor_set(VkDevice device,
+                                 VkDescriptorSet descriptor_set,
+                                 uint32_t binding = 1,  // 通常纹理绑定在binding 1
+                                 VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                 uint32_t array_element = 0) const {
+        if (!is_valid()) {
+            throw std::runtime_error("纹理无效，无法更新描述符集");
+        }
+
+        // 创建描述符图像信息
+        VkDescriptorImageInfo image_info{};
+        image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        image_info.imageView = texture_image_view;
+        image_info.sampler = texture_sampler;
+
+        // 创建描述符写入
+        VkWriteDescriptorSet descriptor_write{};
+        descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptor_write.dstSet = descriptor_set;
+        descriptor_write.dstBinding = binding;
+        descriptor_write.dstArrayElement = array_element;
+        descriptor_write.descriptorType = descriptor_type;
+        descriptor_write.descriptorCount = 1;  // 单个纹理
+        descriptor_write.pImageInfo = &image_info;
+
+        // 更新描述符集
+        vkUpdateDescriptorSets(device, 1, &descriptor_write, 0, nullptr);
+    }
+
+    // 批量更新多个纹理到描述符集（用于数组纹理）
+    static void update_array_to_descriptor_set(VkDevice device,
+                                              VkDescriptorSet descriptor_set,
+                                              const std::vector<vulkan_texture>& textures,
+                                              uint32_t binding = 1,
+                                              uint32_t start_array_element = 0) {
+        if (textures.empty()) return;
+
+        std::vector<VkDescriptorImageInfo> image_infos;
+        image_infos.reserve(textures.size());
+
+        for (const auto& texture : textures) {
+            if (!texture.is_valid()) {
+                throw std::runtime_error("纹理无效，无法更新描述符集");
+            }
+
+            VkDescriptorImageInfo image_info{};
+            image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            image_info.imageView = texture.texture_image_view;
+            image_info.sampler = texture.texture_sampler;
+            image_infos.push_back(image_info);
+        }
+
+        VkWriteDescriptorSet descriptor_write{};
+        descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptor_write.dstSet = descriptor_set;
+        descriptor_write.dstBinding = binding;
+        descriptor_write.dstArrayElement = start_array_element;
+        descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptor_write.descriptorCount = static_cast<uint32_t>(textures.size());
+        descriptor_write.pImageInfo = image_infos.data();
+
+        vkUpdateDescriptorSets(device, 1, &descriptor_write, 0, nullptr);
+    }
+
+    // 更新到独立的采样器和图像描述符（如果需要分离）
+    void update_separate_to_descriptor_set(VkDevice device,
+                                          VkDescriptorSet descriptor_set,
+                                          uint32_t sampler_binding,
+                                          uint32_t image_binding) const {
+        if (!is_valid()) {
+            throw std::runtime_error("纹理无效，无法更新描述符集");
+        }
+
+        // 更新采样器
+        VkDescriptorImageInfo sampler_info{};
+        sampler_info.sampler = texture_sampler;
+
+        VkWriteDescriptorSet sampler_write{};
+        sampler_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        sampler_write.dstSet = descriptor_set;
+        sampler_write.dstBinding = sampler_binding;
+        sampler_write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+        sampler_write.descriptorCount = 1;
+        sampler_write.pImageInfo = &sampler_info;
+
+        // 更新图像视图
+        VkDescriptorImageInfo image_info{};
+        image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        image_info.imageView = texture_image_view;
+
+        VkWriteDescriptorSet image_write{};
+        image_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        image_write.dstSet = descriptor_set;
+        image_write.dstBinding = image_binding;
+        image_write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        image_write.descriptorCount = 1;
+        image_write.pImageInfo = &image_info;
+
+        VkWriteDescriptorSet writes[] = {sampler_write, image_write};
+        vkUpdateDescriptorSets(device, 2, writes, 0, nullptr);
+    }
+
+    // 检查并更新描述符集（如果纹理有效）
+    bool try_update_to_descriptor_set(VkDevice device,
+                                     VkDescriptorSet descriptor_set,
+                                     uint32_t binding = 1,
+                                     VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) const {
+        if (!is_valid()) {
+            return false;
+        }
+
+        try {
+            update_to_descriptor_set(device, descriptor_set, binding, descriptor_type);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
 };
 
 struct vulkan_renderable_object {
     vulkan_mesh_buffer mesh;
+    vulkan_texture texture;
+    VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
 };
 
 class vulkan_runtime {
     vulkan_core core;
-    std::vector<vulkan_mesh_buffer> meshes;
+    std::vector<vulkan_renderable_object> objects;
     vertex_buffer_creator creator;
     buffer_resource vertex_buffer;
     buffer_resource index_buffer;
@@ -397,7 +533,7 @@ class vulkan_runtime {
             return;
         }
 
-        std::array<VkWriteDescriptorSet, 2> descriptor_writes = {};
+        std::array<VkWriteDescriptorSet, 1> descriptor_writes = {};
 
         // Uniform Buffer描述符
         VkDescriptorBufferInfo buffer_info{};
@@ -413,19 +549,6 @@ class vulkan_runtime {
         descriptor_writes[0].descriptorCount = 1;
         descriptor_writes[0].pBufferInfo = &buffer_info;
 
-        // 纹理采样器描述符
-        VkDescriptorImageInfo image_info{};
-        image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        image_info.imageView = texture_image_view;
-        image_info.sampler = texture_sampler;
-
-        descriptor_writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptor_writes[1].dstSet = descriptor_set;
-        descriptor_writes[1].dstBinding = 1;
-        descriptor_writes[1].dstArrayElement = 0;
-        descriptor_writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptor_writes[1].descriptorCount = 1;
-        descriptor_writes[1].pImageInfo = &image_info;
 
         vkUpdateDescriptorSets(core.device, descriptor_writes.size(), descriptor_writes.data(), 0, nullptr);
     }
@@ -614,7 +737,6 @@ public:
           vertex_buffer(core.device),
           index_buffer(core.device) {
               // 初始化描述符集
-        create_descriptor_sets();
         create_uniform_buffers();
 
         // 创建单一的全局管线
@@ -625,16 +747,41 @@ public:
     void add_mesh(const std::vector<glm::vec3>& positions,
                     const std::vector<glm::vec3>& normals,
                     const std::vector<glm::vec2>& tex_coords,  // 纹理坐标
-                    const std::vector<uint32_t>& indexes) {
-        auto new_mesh = vulkan_mesh_buffer(this->core, positions, normals, tex_coords, indexes);
-        this->meshes.push_back(std::move(new_mesh));
+                    const std::vector<uint32_t>& indexes,
+                    const std::string& path = "") {
+        vulkan_renderable_object object = {vulkan_mesh_buffer(this->core, positions, normals, tex_coords, indexes)};
 
-        // 创建纹理资源（如果需要）
-        if (const stb_texture texture = create_default_texture(); texture.pixels && texture.width > 0 && texture.height > 0) {
-            create_texture_from_stb(texture);
-            update_descriptor_sets();  // 更新描述符集
-            std::cout << "纹理资源创建成功，尺寸: " << texture.width << "x" << texture.height << std::endl;
+        // 创建纹理资源
+        vulkan_texture texture;
+        if (path.empty()) {
+            const stb_texture stb_texture1 = create_default_texture();
+            create_texture_from_stb(stb_texture1);
+            texture.texture_image = texture_image;
+            texture.texture_image_memory = texture_image_memory;
+            texture.texture_image_view = texture_image_view;
+            texture.texture_sampler = texture_sampler;
+            texture_image = VK_NULL_HANDLE;
+            texture_image_memory = VK_NULL_HANDLE;
+            texture_image_view = VK_NULL_HANDLE;
+            texture_sampler = VK_NULL_HANDLE;
+            std::cout << "纹理资源创建成功，尺寸: " << stb_texture1.width << "x" << stb_texture1.height << std::endl;
+        } else {
+            load_png_texture(path);
+            texture.texture_image = texture_image;
+            texture.texture_image_memory = texture_image_memory;
+            texture.texture_image_view = texture_image_view;
+            texture.texture_sampler = texture_sampler;
+            texture_image = VK_NULL_HANDLE;
+            texture_image_memory = VK_NULL_HANDLE;
+            texture_image_view = VK_NULL_HANDLE;
+            texture_sampler = VK_NULL_HANDLE;
         }
+
+        object.texture = texture;
+        object.descriptor_set = make_descriptor_sets();
+        object.texture.update_to_descriptor_set(core.device,object.descriptor_set);
+
+        this->objects.push_back(std::move(object));
     }
 
 
@@ -642,7 +789,7 @@ public:
     void set_buffer(const std::vector<glm::vec3>& positions,
                     const std::vector<glm::vec2>& tex_coords,  // 纹理坐标
                     const std::vector<uint32_t>& indexes,
-                    const stb_texture& texture) {             // 纹理数据
+                    const stb_texture& texture_to_set) {             // 纹理数据
 
         // 创建完整的顶点数据（包含位置、法线、纹理坐标）
         std::vector<vertex> vertices;
@@ -687,10 +834,10 @@ public:
         }
 
         // 创建纹理资源（如果需要）
-        if (texture.pixels && texture.width > 0 && texture.height > 0) {
-            create_texture_from_stb(texture);
+        if (texture_to_set.pixels && texture_to_set.width > 0 && texture_to_set.height > 0) {
+            create_texture_from_stb(texture_to_set);
             update_descriptor_sets();  // 更新描述符集
-            std::cout << "纹理资源创建成功，尺寸: " << texture.width << "x" << texture.height << std::endl;
+            std::cout << "纹理资源创建成功，尺寸: " << texture_to_set.width << "x" << texture_to_set.height << std::endl;
         }
     }
 
@@ -766,29 +913,6 @@ public:
         }
     }
 
-
-    auto export_loaded_texture_to_png(const std::string& output_path) const {
-        if (saved_texture_pixels.empty()) {
-            std::cerr << "警告: 没有可导出的纹理数据！\n";
-            return;
-        }
-
-        int result = stbi_write_png(
-            output_path.c_str(),
-            static_cast<int>(saved_texture_width),
-            static_cast<int>(saved_texture_height),
-            saved_texture_channels,
-            saved_texture_pixels.data(),
-            0 // stride, 0 表示无填充
-        );
-
-        if (result != 0) {
-            std::cout << "✅ 纹理已成功导出到: " << output_path << "\n";
-        } else {
-            std::cerr << "❌ 导出纹理失败！\n";
-        }
-    }
-
     // 从PNG数据加载纹理
     void load_png_texture(const std::string& filepath) {
         try {
@@ -860,55 +984,6 @@ public:
             update_descriptor_sets();  // 更新描述符集
         }
     }
-
-    void render_frame() {
-        // 1. 等待前一帧
-        core.wait_for_fences();
-
-        // 2. 获取图像
-        uint32_t image_index;
-        VkResult result;
-        core.get_image_index(image_index, result);
-
-        // 处理交换链重建
-        if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-            core.recreate_swap_chain();
-            return;
-        } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-            throw std::runtime_error("无法获取交换链图像!");
-        }
-
-        // 3. 等待图像可用
-        core.wait_usable_image(image_index);
-        core.reset_fences();
-
-        // 4. 更新Uniform Buffer
-        update_uniform_buffer(image_index);
-
-        // 4. 记录命令缓冲区
-        record_command_buffer(image_index);
-
-        // 5. 提交并呈现
-        core.submit_cmd_buffer();
-
-        const VkSemaphore signal_semaphores[] = {
-            core.render_finished_semaphores[core.current_frame]
-        };
-
-        result = core.present_image(signal_semaphores, image_index);
-
-        // 6. 处理交换链重建
-        if (result == VK_ERROR_OUT_OF_DATE_KHR ||
-            result == VK_SUBOPTIMAL_KHR ||
-            core.framebuffer_resized) {
-            core.framebuffer_resized = false;
-            core.recreate_swap_chain();
-        }
-
-        // 7. 前进到下一帧
-        core.go_to_next_frame();
-    }
-
     void render_frame_with_meshes() {
         // 1. 等待前一帧
         core.wait_for_fences();
@@ -933,10 +1008,11 @@ public:
         // 4. 更新Uniform Buffer
         update_uniform_buffer(image_index);
 
-        // 4. 记录命令缓冲区 - 使用mesh渲染
+        // 5. 记录命令缓冲区 - 使用mesh渲染
         record_command_buffer_with_meshes(image_index);
 
-        // 5. 提交并呈现
+
+        // 6. 提交并呈现
         core.submit_cmd_buffer();
 
         const VkSemaphore signal_semaphores[] = {
@@ -945,7 +1021,7 @@ public:
 
         result = core.present_image(signal_semaphores, image_index);
 
-        // 6. 处理交换链重建
+        // 7. 处理交换链重建
         if (result == VK_ERROR_OUT_OF_DATE_KHR ||
             result == VK_SUBOPTIMAL_KHR ||
             core.framebuffer_resized) {
@@ -953,7 +1029,7 @@ public:
             core.recreate_swap_chain();
             }
 
-        // 7. 前进到下一帧
+        // 8. 前进到下一帧
         core.go_to_next_frame();
     }
 
@@ -984,13 +1060,58 @@ private:
         }
     }
 
+    VkDescriptorSet make_descriptor_sets() const {
+        if (!core.descriptor_set_layout) {
+            return VK_NULL_HANDLE;
+        }
+
+        // 分配描述符集
+        VkDescriptorSet descriptor_set;
+        VkDescriptorSetAllocateInfo alloc_info{};
+        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        alloc_info.descriptorPool = core.descriptor_pool;
+        alloc_info.descriptorSetCount = 1;
+        alloc_info.pSetLayouts = &core.descriptor_set_layout;
+
+        if (vkAllocateDescriptorSets(core.device, &alloc_info, &descriptor_set) != VK_SUCCESS) {
+            throw std::runtime_error("无法分配描述符集!");
+        }
+
+        // 关键：为这个描述符集配置Uniform Buffer！
+        std::array<VkWriteDescriptorSet, 2> descriptor_writes{};
+
+        // 1. Uniform Buffer描述符
+        VkDescriptorBufferInfo buffer_info{};
+        buffer_info.buffer = uniform_buffers[0];  // 使用第一个uniform buffer
+        buffer_info.offset = 0;
+        buffer_info.range = sizeof(uniform_buffer_object);
+
+        descriptor_writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptor_writes[0].dstSet = descriptor_set;
+        descriptor_writes[0].dstBinding = 0;  // binding 0: UBO
+        descriptor_writes[0].dstArrayElement = 0;
+        descriptor_writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptor_writes[0].descriptorCount = 1;
+        descriptor_writes[0].pBufferInfo = &buffer_info;
+
+        // 2. 纹理描述符（暂时为空，稍后由纹理自己填充）
+        descriptor_writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptor_writes[1].dstSet = descriptor_set;
+        descriptor_writes[1].dstBinding = 1;  // binding 1: 纹理
+        descriptor_writes[1].dstArrayElement = 0;
+        descriptor_writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptor_writes[1].descriptorCount = 1;
+        descriptor_writes[1].pImageInfo = nullptr;  // 稍后由纹理填充
+
+        // 更新描述符集（先只更新UBO，纹理稍后）
+        vkUpdateDescriptorSets(core.device, 1, &descriptor_writes[0], 0, nullptr);
+
+        return descriptor_set;
+    }
 
 
     // 从stb_texture创建Vulkan纹理
     void create_texture_from_stb(const stb_texture& texture) {
-        // 清理现有纹理资源
-        cleanup_texture_resources();
-
         // 创建暂存缓冲区
         VkBuffer staging_buffer;
         VkDeviceMemory staging_buffer_memory;
@@ -1408,7 +1529,9 @@ private:
         }
     }
 
-    void record_command_buffer(const uint32_t image_index) const {
+
+
+    void record_command_buffer(const uint32_t image_index, const vulkan_texture& vk_texture) const {
         VkCommandBuffer cmd_buffer = core.command_buffers[core.current_frame];
 
         VkCommandBufferBeginInfo begin_info{};
@@ -1439,7 +1562,9 @@ private:
         // 2. 绑定管线
         vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline);
 
-        // 3. 绑定描述符集 - 修复绑定位置
+
+        vk_texture.update_to_descriptor_set(core.device, descriptor_set);
+        // 3. 绑定描述符集
         if (descriptor_set != VK_NULL_HANDLE) {
             vkCmdBindDescriptorSets(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                   pipeline_layout, 0, 1, &descriptor_set, 0, nullptr);
@@ -1535,36 +1660,31 @@ private:
         scissor.extent = core.swap_chain_extent;
         vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
 
-        // 4. 绑定描述符集
-        if (descriptor_set != VK_NULL_HANDLE) {
-            vkCmdBindDescriptorSets(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                  pipeline_layout, 0, 1, &descriptor_set, 0, nullptr);
-        }
 
-        // 5. 绘制所有网格
-        for (size_t i = 0; i < this->meshes.size(); i++) {
-            const auto& mesh = this->meshes[i];
+        // 5. 遍历并绘制所有对象
+        for (const auto& object : objects) {
+            // 绑定描述符集 - 每个对象有自己的描述符集
+            if (object.descriptor_set != VK_NULL_HANDLE) {
+                vkCmdBindDescriptorSets(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                      pipeline_layout, 0, 1, &object.descriptor_set, 0, nullptr);
+            }
 
-            // 绑定当前网格的缓冲区
-            mesh.bind(cmd_buffer);  // 统一绑定顶点和索引缓冲区
+            // 纹理已经在创建对象时更新到描述符集，不需要每次渲染都更新
+
+            const auto& mesh = object.mesh;
+            mesh.bind(cmd_buffer);
 
             if (mesh.has_indices()) {
-                // 有索引的绘制
                 vkCmdDrawIndexed(cmd_buffer,
-                               static_cast<uint32_t>(mesh.get_index_count()),
-                               1,           // instance count
-                               0,           // first index
-                               0,           // vertex offset
-                               0);          // first instance
+                                static_cast<uint32_t>(mesh.get_index_count()),
+                                1, 0, 0, 0);
             } else {
-                // 无索引的绘制
                 vkCmdDraw(cmd_buffer,
                          static_cast<uint32_t>(mesh.get_vertex_count()),
-                         1,           // instance count
-                         0,           // first vertex
-                         0);          // first instance
+                         1, 0, 0);
             }
         }
+
 
         vkCmdEndRenderPass(cmd_buffer);
 

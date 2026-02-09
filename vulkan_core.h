@@ -78,8 +78,8 @@ VkFormat find_depth_format(const VkPhysicalDevice &physical_device);
 VkImageView create_image_view(const VkImage& image, const VkFormat& format, const VkImageAspectFlags& aspectFlags, const VkDevice& device);
 VkSampleCountFlagBits get_max_usable_sample_count(const VkPhysicalDevice& physical_device);
 
-constexpr uint32_t WIDTH = 800;
-constexpr uint32_t HEIGHT = 600;
+constexpr uint32_t WIDTH = 1080;
+constexpr uint32_t HEIGHT = 960;
 
 
 struct vulkan_core {
@@ -510,7 +510,6 @@ struct vulkan_core {
 
     std::vector<VkFramebuffer> swap_chain_framebuffers;
 
-
     void create_framebuffers() {
         swap_chain_framebuffers.resize(swap_chain_image_views.size());
 
@@ -560,45 +559,9 @@ struct vulkan_core {
         }
     }
 
-
-    VkShaderModule vert_shader_module = {};
-    VkShaderModule frag_shader_module = {};
     VkPipelineLayout pipeline_layout = {};
-    VkPipeline graphics_pipeline = {};
 
-    void create_graphics_pipeline() {
-        // 1. 读取并创建着色器模块
-        this->vert_shader_module = VK_NULL_HANDLE;
-        this->frag_shader_module = VK_NULL_HANDLE;
-
-        try {
-            auto vert_shader_code = read_file("vert.spv");  // 需要先编译着色器
-            auto frag_shader_code = read_file("frag.spv");
-
-            vert_shader_module = create_shader_module(vert_shader_code, this->device);
-            frag_shader_module = create_shader_module(frag_shader_code, this->device);
-        } catch (const std::exception& e) {
-            std::cout << "着色器文件加载失败: " << e.what() << std::endl;
-            std::cout << "请确保 shader.vert.spv 和 shader.frag.spv 文件存在于可执行文件目录中" << std::endl;
-
-            // 创建一个简单的内联着色器或返回错误
-            throw std::runtime_error("着色器文件缺失，请先编译着色器");
-        };
-
-        // 2. 着色器阶段配置
-        VkPipelineShaderStageCreateInfo vert_shader_stage_info{};
-        vert_shader_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        vert_shader_stage_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
-        vert_shader_stage_info.module = vert_shader_module;
-        vert_shader_stage_info.pName = "main";
-
-        VkPipelineShaderStageCreateInfo frag_shader_stage_info{};
-        frag_shader_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        frag_shader_stage_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-        frag_shader_stage_info.module = frag_shader_module;
-        frag_shader_stage_info.pName = "main";
-
-        VkPipelineShaderStageCreateInfo shaderStages[] = {vert_shader_stage_info, frag_shader_stage_info};
+    void create_graphics_pipeline_layout() {
 
         // 3. 顶点输入状态（使用新的Vertex结构）
         auto binding_description = vertex::get_binding_descriptions();
@@ -617,25 +580,9 @@ struct vulkan_core {
         input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         input_assembly.primitiveRestartEnable = VK_FALSE;
 
-        // 5. 视口和裁剪
-        VkViewport viewport{};
-        viewport.x = 0.0f;
-        viewport.y = 0.0f;
-        viewport.width = static_cast<float>(swap_chain_extent.width);
-        viewport.height = static_cast<float>(swap_chain_extent.height);
-        viewport.minDepth = 0.0f;
-        viewport.maxDepth = 1.0f;
-
         VkRect2D scissor{};
         scissor.offset = {0, 0};
         scissor.extent = swap_chain_extent;
-
-        VkPipelineViewportStateCreateInfo viewport_state{};
-        viewport_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-        viewport_state.viewportCount = 1;
-        viewport_state.pViewports = &viewport;
-        viewport_state.scissorCount = 1;
-        viewport_state.pScissors = &scissor;
 
         // 6. 光栅化状态
         VkPipelineRasterizationStateCreateInfo rasterizer{};
@@ -708,47 +655,7 @@ struct vulkan_core {
         if (vkCreatePipelineLayout(this->device, &pipeline_layout_info, nullptr, &this->pipeline_layout) != VK_SUCCESS) {
             throw std::runtime_error("failed to create pipeline layout!");
         }
-
-        //深度测试
-        VkPipelineDepthStencilStateCreateInfo depthStencil{};
-        depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-        depthStencil.pNext = nullptr;
-        depthStencil.flags = 0;
-        depthStencil.depthTestEnable = VK_TRUE;
-        depthStencil.depthWriteEnable = VK_TRUE;
-        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
-        depthStencil.depthBoundsTestEnable = VK_FALSE;
-        depthStencil.minDepthBounds = 0.0f;      // 可选的深度边界测试
-        depthStencil.maxDepthBounds = 1.0f;
-        depthStencil.stencilTestEnable = VK_FALSE;
-        depthStencil.front = {};  // 模板测试前端状态
-        depthStencil.back = {};   // 模板测试后端状态
-
-        // 11. 创建图形管线
-        VkGraphicsPipelineCreateInfo pipeline_info = {};
-        pipeline_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-        pipeline_info.stageCount = 2;
-        pipeline_info.pStages = shaderStages;
-        pipeline_info.pVertexInputState = &vertex_input_info;
-        pipeline_info.pInputAssemblyState = &input_assembly;
-        pipeline_info.pViewportState = &viewport_state;
-        pipeline_info.pRasterizationState = &rasterizer;
-        pipeline_info.pMultisampleState = &multisampling;
-        pipeline_info.pColorBlendState = &color_blending;
-        pipeline_info.pDynamicState = &dynamic_state;
-        pipeline_info.layout = pipeline_layout;
-        pipeline_info.renderPass = this->renderpass;
-        pipeline_info.subpass = 0;
-        pipeline_info.basePipelineHandle = VK_NULL_HANDLE;
-        pipeline_info.basePipelineIndex = -1;
-        pipeline_info.pDepthStencilState = &depthStencil;
-
-        if (vkCreateGraphicsPipelines(this->device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &this->graphics_pipeline) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create graphics pipeline!");
-        }
     }
-
-
 
     VkDescriptorSetLayout descriptor_set_layout = VK_NULL_HANDLE;
 
@@ -1034,7 +941,7 @@ struct vulkan_core {
         }
 
         this->create_renderpass();
-        this->create_graphics_pipeline();
+        this->create_graphics_pipeline_layout();
         this->create_framebuffers();
         this->create_command_buffers();
 
@@ -1167,13 +1074,13 @@ struct vulkan_core {
             this->create_descriptor_pool();
             std::cout << "描述符池创建完成" << std::endl;
 
-            this->create_renderpass();       // ✅ 先创建渲染通道
+            this->create_renderpass();
             std::cout << "渲染通道创建完成" << std::endl;
 
-            this->create_framebuffers();      // ✅ 现在可以创建帧缓冲区了
+            this->create_framebuffers();
             std::cout << "帧缓冲区创建完成" << std::endl;
 
-            this->create_graphics_pipeline();
+            this->create_graphics_pipeline_layout();
 
             this->create_command_pool();
             std::cout << "命令池创建完成" << std::endl;
@@ -1181,7 +1088,6 @@ struct vulkan_core {
             this->create_command_buffers();
             std::cout << "命令缓冲区创建完成" << std::endl;
 
-            // ✅ 新增：创建同步对象
             this->create_sync_objects();
             std::cout << "同步对象创建完成" << std::endl;
 
