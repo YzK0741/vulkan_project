@@ -7,8 +7,6 @@
 
 #include <string_view>
 
-class gltf_parser {
-};
 
 void load_gltf(const std::string_view path);
 

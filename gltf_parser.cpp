@@ -5,8 +5,7 @@
 #include <print>
 #include <tinygltf/tiny_gltf.h>
 #include "gltf_parser.h"
-
-#include <iostream>
+#include "utility.h"
 
 void load_gltf(const std::string_view path) {
     tinygltf::Model model;
@@ -16,14 +15,15 @@ void load_gltf(const std::string_view path) {
     auto success = loader.LoadBinaryFromFile(&model, &err, &warn, path.data());
 
     if (!warn.empty())
-        std::cout << warn;
+        std::println("{}", warn);
     if (!err.empty())
-        std::cout << err;
+        std::println("{}", err);
 
-    if (!success)
-        throw std::runtime_error("failed load model");
+    if (!success){
+        std::println("failed load model");
+        print_stacktrace_and_terminate();
     }
 
-    std::println("加载模型成功")
+    std::println("加载模型成功");
 
 }
