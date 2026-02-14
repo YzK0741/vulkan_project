@@ -12,7 +12,6 @@
 #include "png_loader.h"
 #include "vulkan_buffer.h"
 
-// vulkan_runtime.h 中的 vulkan_mesh_buffer 类的完整修复版本
 struct vulkan_mesh_buffer {
 private:
     std::reference_wrapper<const vulkan_core> core_ref;
@@ -331,7 +330,6 @@ public:
 
 };
 
-// vulkan_runtime.h 中的纹理系统简化版实现
 
 struct vulkan_texture {
     VkImage texture_image = VK_NULL_HANDLE;
@@ -744,7 +742,7 @@ public:
         create_pipeline_layout();
     }
 
-    void add_mesh(const std::vector<glm::vec3>& positions,
+    void add_object(const std::vector<glm::vec3>& positions,
                     const std::vector<glm::vec3>& normals,
                     const std::vector<glm::vec2>& tex_coords,  // 纹理坐标
                     const std::vector<uint32_t>& indexes,
@@ -784,92 +782,6 @@ public:
         this->objects.push_back(std::move(object));
     }
 
-
-    // 设置缓冲区数据
-    void set_buffer(const std::vector<glm::vec3>& positions,
-                    const std::vector<glm::vec2>& tex_coords,  // 纹理坐标
-                    const std::vector<uint32_t>& indexes,
-                    const stb_texture& texture_to_set) {             // 纹理数据
-
-        // 创建完整的顶点数据（包含位置、法线、纹理坐标）
-        std::vector<vertex> vertices;
-        vertices.reserve(positions.size());
-
-        for (size_t i = 0; i < positions.size(); ++i) {
-            vertex v{};
-            v.position = positions[i];
-
-            // 如果有纹理坐标则使用，否则使用默认值
-            if (i < tex_coords.size()) {
-                v.tex_coord = tex_coords[i];
-            } else {
-                v.tex_coord = glm::vec2(positions[i].x + 0.5f, positions[i].y + 0.5f);
-            }
-
-            // 简单计算法线（对于平面三角形，法线都是向上的）
-            v.normal = glm::vec3(0.0f, 0.0f, 1.0f);
-            vertices.push_back(v);
-        }
-
-        // 创建顶点缓冲区
-        if (!vertices.empty()) {
-            auto result = creator.create_vertex_buffer(vertices);
-            vertex_buffer.set(result.buffer, result.memory,
-                            vertices.size() * sizeof(vertex), core.device);
-            std::cout << "顶点缓冲区创建成功，大小: " << vertices.size() << " 个顶点" << std::endl;
-        } else {
-            vertex_buffer.cleanup();
-        }
-
-        // 创建索引缓冲区
-        if (!indexes.empty()) {
-            auto result = creator.create_index_buffer(indexes);
-            index_buffer.set(result.buffer, result.memory,
-                           indexes.size() * sizeof(uint32_t), core.device);
-            index_count = static_cast<uint32_t>(indexes.size());
-            std::cout << "索引缓冲区创建成功，大小: " << indexes.size() << " 个索引" << std::endl;
-        } else {
-            index_buffer.cleanup();
-            index_count = 0;
-        }
-
-        // 创建纹理资源（如果需要）
-        if (texture_to_set.pixels && texture_to_set.width > 0 && texture_to_set.height > 0) {
-            create_texture_from_stb(texture_to_set);
-            update_descriptor_sets();  // 更新描述符集
-            std::cout << "纹理资源创建成功，尺寸: " << texture_to_set.width << "x" << texture_to_set.height << std::endl;
-        }
-    }
-
-    // 版本1：只使用位置（向后兼容）
-    void set_buffer(const std::vector<glm::vec3>& positions,
-                    const std::vector<uint32_t>& indexes) {
-        // 创建默认的纹理坐标
-        std::vector<glm::vec2> default_tex_coords;
-        for (const auto& pos : positions) {
-            default_tex_coords.emplace_back(
-                (pos.x + 0.5f) / 1.0f,
-                (pos.y + 0.5f) / 1.0f
-            );
-        }
-
-        // 创建默认纹理（简单测试纹理）
-        stb_texture default_texture = create_default_texture();
-
-        // 调用完整版本
-        set_buffer(positions, default_tex_coords, indexes, default_texture);
-    }
-
-    // 版本2：包含纹理坐标
-    void set_buffer(const std::vector<glm::vec3>& positions,
-                    const std::vector<glm::vec2>& tex_coords,
-                    const std::vector<uint32_t>& indexes) {
-        // 创建默认纹理（简单测试纹理）
-        stb_texture default_texture = create_default_texture();
-
-        set_buffer(positions, tex_coords, indexes, default_texture);
-    }
-
     void update_uniform_buffer(uint32_t current_image) const {
         uniform_buffer_object ubo{};
 
@@ -878,15 +790,15 @@ public:
         angle += glm::radians(1.0f);  // 每秒旋转
 
         ubo.model = glm::mat4(1.0f);
-        ubo.model = glm::scale(ubo.model, glm::vec3(3.0f, 3.0f, 3.0f));  // 缩放
+        ubo.model = glm::scale(ubo.model, glm::vec3(2.0f,  2.0f, 2.0f));  // 缩放
 
         // 修正旋转：将模型的Z轴向上转为Y轴向上
-        ubo.model = glm::rotate(ubo.model, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.1f));
+        ubo.model = glm::rotate(ubo.model, glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 0.1f));
 
         // 2. 向下平移（注意坐标系方向！）
-        ubo.model = glm::translate(ubo.model, glm::vec3(0.0f, -1.0f, 0.0f));  // 向下移动1个单位
+        //ubo.model = glm::translate(ubo.model, glm::vec3(0.0f, -1.0f, 0.0f));  // 向下移动1个单位
 
-        ubo.model = glm::rotate(ubo.model, angle, glm::vec3(0.0f, 1.0f, 0.0f));  // 持续旋转
+        ubo.model = glm::rotate(ubo.model, angle, glm::vec3(0.0f, 0.0f, 1.0f));  // 持续旋转
 
         // 2. 视图矩阵：调整相机位置
         ubo.view = glm::lookAt(
@@ -1060,7 +972,7 @@ private:
         }
     }
 
-    VkDescriptorSet make_descriptor_sets() const {
+    [[nodiscard]] VkDescriptorSet make_descriptor_sets() const {
         if (!core.descriptor_set_layout) {
             return VK_NULL_HANDLE;
         }
@@ -1615,7 +1527,7 @@ private:
     }
 
     void record_command_buffer_with_meshes(const uint32_t image_index) const {
-        const VkCommandBuffer cmd_buffer = core.command_buffers[core.current_frame];
+        VkCommandBuffer cmd_buffer = core.command_buffers[core.current_frame];
 
         VkCommandBufferBeginInfo begin_info{};
         begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -1766,7 +1678,7 @@ public:
                       << indices[i] << ", " << indices[i+1] << ", " << indices[i+2] << std::endl;
         }
 
-        add_mesh(positions, normals, tex_coords, indices);
+        add_object(positions, normals, tex_coords, indices);
     }
 };
 
