@@ -38,8 +38,6 @@ private:
         const VkDeviceSize size = sizeof(T) * data.size();
         VkBuffer staging_buffer = VK_NULL_HANDLE;
         VkDeviceMemory staging_memory = VK_NULL_HANDLE;
-
-        try {
             create_buffer(
                 core.device,
                 core.physical_device,
@@ -52,7 +50,8 @@ private:
             void *mapped_data = nullptr;
             VkResult result = vkMapMemory(core.device, staging_memory, 0, size, 0, &mapped_data);
             if (result != VK_SUCCESS) {
-                throw std::runtime_error("Failed to map memory for staging buffer");
+                std::println("Failed to map memory for staging buffer");
+                print_stacktrace_and_terminate();
             }
             memcpy(mapped_data, data.data(), size);
             vkUnmapMemory(core.device, staging_memory);
@@ -71,16 +70,6 @@ private:
             vkDestroyBuffer(core.device, staging_buffer, nullptr);
             vkFreeMemory(core.device, staging_memory, nullptr);
 
-        } catch (...) {
-            // 清理资源
-            if (staging_buffer != VK_NULL_HANDLE) {
-                vkDestroyBuffer(core.device, staging_buffer, nullptr);
-            }
-            if (staging_memory != VK_NULL_HANDLE) {
-                vkFreeMemory(core.device, staging_memory, nullptr);
-            }
-            throw;
-        }
     }
 
     void cleanup() {
@@ -150,7 +139,8 @@ public:
         : core_ref(core) {
 
         if (vertices.empty()) {
-            throw std::invalid_argument("Vertices cannot be empty");
+            std::println("Vertices cannot be empty");
+            print_stacktrace_and_terminate();
         }
 
         vertex_count = vertices.size();
@@ -161,7 +151,8 @@ public:
         } else if constexpr (sizeof(IndexT) == 4) {
             index_type = VK_INDEX_TYPE_UINT32;
         } else {
-            throw std::invalid_argument("Unsupported index type");
+            std::println("Unsupported index type");
+            print_stacktrace_and_terminate();
         }
 
         // 直接使用vertex结构创建交错顶点缓冲区
@@ -192,17 +183,20 @@ public:
         : core_ref(core) {
 
         if (positions.empty()) {
-            throw std::invalid_argument("Vertex positions cannot be empty");
+            std::println("Vertex positions cannot be empty");
+            print_stacktrace_and_terminate();
         }
 
         vertex_count = positions.size();
 
         // 验证数据一致性
         if (!normals.empty() && normals.size() != vertex_count) {
-            throw std::invalid_argument("Normals count must match positions count");
+            std::println("Normals count must match positions count");
+            print_stacktrace_and_terminate();
         }
         if (!tex_coords.empty() && tex_coords.size() != vertex_count) {
-            throw std::invalid_argument("Texture coordinates count must match positions count");
+            std::println("Texture coordinates count must match positions count");
+            print_stacktrace_and_terminate();
         }
 
         // 设置索引类型
@@ -211,7 +205,8 @@ public:
         } else if constexpr (sizeof(IndexT) == 4) {
             index_type = VK_INDEX_TYPE_UINT32;
         } else {
-            throw std::invalid_argument("Unsupported index type");
+            std::println("Unsupported index type");
+            print_stacktrace_and_terminate();
         }
 
         // 将分离的顶点属性转换为交错vertex结构
@@ -352,7 +347,8 @@ struct vulkan_texture {
                                  VkDescriptorType descriptor_type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                  uint32_t array_element = 0) const {
         if (!is_valid()) {
-            throw std::runtime_error("纹理无效，无法更新描述符集");
+            std::println("纹理无效，无法更新描述符集");
+            print_stacktrace_and_terminate();
         }
 
         // 创建描述符图像信息
@@ -388,7 +384,8 @@ struct vulkan_texture {
 
         for (const auto& texture : textures) {
             if (!texture.is_valid()) {
-                throw std::runtime_error("纹理无效，无法更新描述符集");
+                std::println("纹理无效，无法更新描述符集");
+                print_stacktrace_and_terminate();
             }
 
             VkDescriptorImageInfo image_info{};
@@ -416,7 +413,8 @@ struct vulkan_texture {
                                           uint32_t sampler_binding,
                                           uint32_t image_binding) const {
         if (!is_valid()) {
-            throw std::runtime_error("纹理无效，无法更新描述符集");
+            std::println("纹理无效，无法更新描述符集");
+            print_stacktrace_and_terminate();
         }
 
         // 更新采样器
@@ -456,14 +454,9 @@ struct vulkan_texture {
         if (!is_valid()) {
             return false;
         }
-
-        try {
-            update_to_descriptor_set(device, descriptor_set, binding, descriptor_type);
-            return true;
-        } catch (...) {
-            return false;
+        update_to_descriptor_set(device, descriptor_set, binding, descriptor_type);
+        return true;
         }
-    }
 };
 
 struct vulkan_renderable_object {
@@ -561,7 +554,8 @@ class vulkan_runtime {
         pipeline_layout_info.pPushConstantRanges = nullptr;
 
         if (vkCreatePipelineLayout(core.device, &pipeline_layout_info, nullptr, &pipeline_layout) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create pipeline layout!");
+            std::println("failed to create pipeline layout!");
+            print_stacktrace_and_terminate();
         }
     }
 
@@ -569,20 +563,24 @@ class vulkan_runtime {
     [[nodiscard]] VkPipeline create_mesh_pipeline() {
         // 1. 验证核心对象
         if (core.device == VK_NULL_HANDLE) {
-                throw std::runtime_error("Vulkan device is not initialized");
+            std::println("Vulkan device is not initialized");
+            print_stacktrace_and_terminate();
         }
 
         if (core.swap_chain_extent.width == 0 || core.swap_chain_extent.height == 0) {
-                throw std::runtime_error("Swap chain extent is invalid");
+            std::println("Swap chain extent is not initialized");
+            print_stacktrace_and_terminate();
         }
 
         if (core.renderpass == VK_NULL_HANDLE) {
-                throw std::runtime_error("Render pass is not initialized");
+            std::println("Render pass is not initialized");
+            print_stacktrace_and_terminate();
         }
 
         this->pipeline_layout = this->core.pipeline_layout;
         if (pipeline_layout == VK_NULL_HANDLE) {
-            throw std::runtime_error("Pipeline layout is not initialized");
+            std::println("Pipeline layout is not initialized");
+            print_stacktrace_and_terminate();
         }
 
         // 使用全局的顶点输入描述（与vertex结构匹配）
@@ -599,21 +597,16 @@ class vulkan_runtime {
         // 读取并创建着色器模块
         VkShaderModule vert_shader_module = VK_NULL_HANDLE;
         VkShaderModule frag_shader_module = VK_NULL_HANDLE;
+        auto vert_shader_code = read_file("vert.spv");
+        auto frag_shader_code = read_file("frag.spv");
 
-        try {
-            auto vert_shader_code = read_file("vert.spv");
-            auto frag_shader_code = read_file("frag.spv");
-
-            if (vert_shader_code.empty() || frag_shader_code.empty()) {
-                throw std::runtime_error("着色器文件为空");
-            }
-
-            vert_shader_module = create_shader_module(vert_shader_code, core.device);
-            frag_shader_module = create_shader_module(frag_shader_code, core.device);
-        } catch (const std::exception& e) {
-            std::cout << "着色器文件加载失败: " << e.what() << std::endl;
-            throw std::runtime_error("着色器文件缺失，请先编译着色器");
+        if (vert_shader_code.empty() || frag_shader_code.empty()) {
+            std::println("着色器文件为空");
+            print_stacktrace_and_terminate();
         }
+
+        vert_shader_module = create_shader_module(vert_shader_code, core.device);
+        frag_shader_module = create_shader_module(frag_shader_code, core.device);
 
         VkPipelineShaderStageCreateInfo vert_shader_stage_info{};
         vert_shader_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -718,7 +711,8 @@ class vulkan_runtime {
 
         VkPipeline pipeline;
         if (vkCreateGraphicsPipelines(core.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create graphics pipeline!");
+            std::println("failed to create graphics pipeline!");
+            print_stacktrace_and_terminate();
         }
 
         // 清理着色器模块
@@ -827,7 +821,6 @@ public:
 
     // 从PNG数据加载纹理
     void load_png_texture(const std::string& filepath) {
-        try {
             png_texture_data texture_data = png_texture_loader::load_png_texture(filepath);
 
             // 创建Vulkan纹理资源
@@ -845,15 +838,6 @@ public:
 
             update_descriptor_sets();  // 更新描述符集
             std::cout << "PNG纹理加载成功: " << filepath << std::endl;
-        } catch (const std::exception& e) {
-            std::cerr << "PNG纹理加载失败: " << e.what() << std::endl;
-
-
-            // 创建默认纹理
-            stb_texture default_texture = create_default_texture();
-            create_texture_from_stb(default_texture);
-            update_descriptor_sets();  // 更新描述符集
-        }
     }
 
     // 从PNG纹理数据加载
@@ -865,7 +849,6 @@ public:
         saved_texture_width = texture_data.width;
         saved_texture_height = texture_data.height;
         saved_texture_channels = texture_data.channels;
-        try {
             // 创建Vulkan纹理资源
             png_texture_loader::create_vulkan_texture(
                 core.device,
@@ -881,20 +864,6 @@ public:
 
             update_descriptor_sets();  // 更新描述符集
             std::cout << "PNG纹理从数据加载成功" << std::endl;
-        } catch (const std::exception& e) {
-            std::cerr << "PNG纹理从数据加载失败: " << e.what() << std::endl;
-
-            // 保存原始数据用于调试导出
-            saved_texture_pixels.assign(texture_data.pixel_data, texture_data.pixel_data + texture_data.image_size);
-            saved_texture_width = texture_data.width;
-            saved_texture_height = texture_data.height;
-            saved_texture_channels = texture_data.channels;
-
-            // 创建默认纹理
-            stb_texture default_texture = create_default_texture();
-            create_texture_from_stb(default_texture);
-            update_descriptor_sets();  // 更新描述符集
-        }
     }
     void render_frame_with_meshes() {
         // 1. 等待前一帧
@@ -910,7 +879,8 @@ public:
             core.recreate_swap_chain();
             return;
         } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-            throw std::runtime_error("无法获取交换链图像!");
+            std::println("无法获取交换链图像!");
+            print_stacktrace_and_terminate();
         }
 
         // 3. 等待图像可用
@@ -968,7 +938,7 @@ private:
         alloc_info.pSetLayouts = &core.descriptor_set_layout; // 假设core中有descriptor_set_layouts
 
         if (vkAllocateDescriptorSets(core.device, &alloc_info, &descriptor_set) != VK_SUCCESS) {
-            throw std::runtime_error("无法分配描述符集!");
+            std::println("无法分配描述符集!");
         }
     }
 
@@ -986,7 +956,8 @@ private:
         alloc_info.pSetLayouts = &core.descriptor_set_layout;
 
         if (vkAllocateDescriptorSets(core.device, &alloc_info, &descriptor_set) != VK_SUCCESS) {
-            throw std::runtime_error("无法分配描述符集!");
+            std::println("无法分配描述符集!");
+            print_stacktrace_and_terminate();
         }
 
         // 关键：为这个描述符集配置Uniform Buffer！
@@ -1172,7 +1143,8 @@ private:
         buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         if (vkCreateBuffer(device, &buffer_info, nullptr, &buffer) != VK_SUCCESS) {
-            throw std::runtime_error("无法创建缓冲区!");
+            std::println("无法创建缓冲区!");
+            print_stacktrace_and_terminate();
         }
 
         VkMemoryRequirements mem_requirements;
@@ -1188,7 +1160,8 @@ private:
         );
 
         if (vkAllocateMemory(device, &alloc_info, nullptr, &buffer_memory) != VK_SUCCESS) {
-            throw std::runtime_error("无法分配缓冲区内存!");
+            std::println("无法分配缓冲区内存!");
+            print_stacktrace_and_terminate();
         }
 
         vkBindBufferMemory(device, buffer, buffer_memory, 0);
@@ -1222,7 +1195,8 @@ private:
 
         if (vkCreateImage(device, &image_info, nullptr, &image) != VK_SUCCESS) {
             vkDestroyImage(device, image, nullptr);
-            throw std::runtime_error("failed to create texture image!");
+            std::println("failed to create texture image!");
+            print_stacktrace_and_terminate();
         }
 
         VkMemoryRequirements mem_requirements;
@@ -1238,7 +1212,8 @@ private:
         );
 
         if (vkAllocateMemory(device, &alloc_info, nullptr, &image_memory) != VK_SUCCESS) {
-            throw std::runtime_error("failed to allocate texture image memory!");
+            std::println("failed to allocate texture image memory!");
+            print_stacktrace_and_terminate();
         }
 
         vkBindImageMemory(device, image, image_memory, 0);
@@ -1294,7 +1269,8 @@ private:
             source_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
             destination_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
         } else {
-            throw std::runtime_error("不支持的图像布局转换!");
+            std::println("不支持的图像布局转换!");
+            print_stacktrace_and_terminate();
         }
 
         vkCmdPipelineBarrier(
@@ -1410,7 +1386,8 @@ private:
 
         VkImageView image_view;
         if (vkCreateImageView(device, &view_info, nullptr, &image_view) != VK_SUCCESS) {
-            throw std::runtime_error("无法创建纹理图像视图!");
+            std::println("无法创建纹理图像视图!");
+            print_stacktrace_and_terminate();
         }
 
         return image_view;
@@ -1437,7 +1414,8 @@ private:
         sampler_info.maxLod = 0.0f;
 
         if (vkCreateSampler(core.device, &sampler_info, nullptr, &texture_sampler) != VK_SUCCESS) {
-            throw std::runtime_error("无法创建纹理采样器!");
+            std::println("无法创建纹理采样器!");
+            print_stacktrace_and_terminate();
         }
     }
 
@@ -1451,7 +1429,8 @@ private:
         begin_info.flags = 0;
 
         if (vkBeginCommandBuffer(cmd_buffer, &begin_info) != VK_SUCCESS) {
-            throw std::runtime_error("无法开始记录命令缓冲区!");
+            std::println("无法开始记录命令缓冲区!");
+            print_stacktrace_and_terminate();
         }
 
         // 1. 开始渲染通道
@@ -1522,7 +1501,8 @@ private:
         vkCmdEndRenderPass(cmd_buffer);
 
         if (vkEndCommandBuffer(cmd_buffer) != VK_SUCCESS) {
-            throw std::runtime_error("无法结束记录命令缓冲区!");
+            std::println("无法结束记录命令缓冲区!");
+            print_stacktrace_and_terminate();
         }
     }
 
@@ -1534,7 +1514,8 @@ private:
         begin_info.flags = 0;
 
         if (vkBeginCommandBuffer(cmd_buffer, &begin_info) != VK_SUCCESS) {
-            throw std::runtime_error("无法开始记录命令缓冲区!");
+            std::println("无法开始记录命令缓冲区!");
+            print_stacktrace_and_terminate();
         }
 
         // 1. 开始渲染通道
@@ -1601,7 +1582,8 @@ private:
         vkCmdEndRenderPass(cmd_buffer);
 
         if (vkEndCommandBuffer(cmd_buffer) != VK_SUCCESS) {
-            throw std::runtime_error("无法结束记录命令缓冲区!");
+            std::println("无法结束记录命令缓冲区!");
+            print_stacktrace_and_terminate();
         }
     }
 
@@ -1621,64 +1603,6 @@ public:
         }
 
         cleanup_texture_resources();
-    }
-    // 在 vulkan_runtime.h 中添加测试函数
-    void test_simple_cube() {
-        std::cout << "=== 测试立方体 ===" << std::endl;
-
-        // 立方体的8个顶点
-        std::vector<glm::vec3> positions = {
-            // 前面
-            {-0.5f, -0.5f, 0.5f},  // 0
-            {0.5f, -0.5f, 0.5f},   // 1
-            {0.5f, 0.5f, 0.5f},    // 2
-            {-0.5f, 0.5f, 0.5f},   // 3
-
-            // 后面
-            {-0.5f, -0.5f, -0.5f}, // 4
-            {0.5f, -0.5f, -0.5f},  // 5
-            {0.5f, 0.5f, -0.5f},   // 6
-            {-0.5f, 0.5f, -0.5f}   // 7
-        };
-
-        std::vector<glm::vec3> normals = {
-            {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}, // 前面
-            {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f, -1.0f}, {0.0f, 0.0f, -1.0f} // 后面
-        };
-
-        std::vector<glm::vec2> tex_coords = {
-            {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f},
-            {0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}
-        };
-
-        // 立方体的12个三角形（36个索引）
-        std::vector<uint32_t> indices = {
-            // 前面
-            0, 1, 2, 2, 3, 0,
-            // 右面
-            1, 5, 6, 6, 2, 1,
-            // 后面
-            5, 4, 7, 7, 6, 5,
-            // 左面
-            4, 0, 3, 3, 7, 4,
-            // 顶面
-            3, 2, 6, 6, 7, 3,
-            // 底面
-            4, 5, 1, 1, 0, 4
-        };
-
-        std::cout << "测试立方体数据:" << std::endl;
-        std::cout << "  顶点数: " << positions.size() << std::endl;
-        std::cout << "  索引数: " << indices.size() << std::endl;
-        std::cout << "  三角形数: " << indices.size() / 3 << std::endl;
-
-        // 打印前几个索引
-        for (int i = 0; i < std::min(12, static_cast<int>(indices.size())); i += 3) {
-            std::cout << "  三角形[" << i/3 << "]: "
-                      << indices[i] << ", " << indices[i+1] << ", " << indices[i+2] << std::endl;
-        }
-
-        add_object(positions, normals, tex_coords, indices);
     }
 };
 

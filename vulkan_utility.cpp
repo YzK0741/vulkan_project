@@ -417,18 +417,20 @@ make_unique_vertex(const std::vector<vertex>& vertices, const std::vector<uint32
 
     // 输入验证
     if (vertices.empty()) {
-        throw std::invalid_argument("顶点数组不能为空");
+        std::println("顶点数组不能为空");
+        print_stacktrace_and_terminate();
     }
 
     if (indices.empty()) {
-        throw std::invalid_argument("索引数组不能为空");
+        std::println("索引数组不能为空");
+        print_stacktrace_and_terminate();
     }
 
     // 检查索引是否有效
     for (uint32_t idx : indices) {
         if (idx >= vertices.size()) {
-            throw std::out_of_range("索引 " + std::to_string(idx) +
-                                   " 超出顶点数组范围");
+            std::println("索引 {} 超出顶点数组范围", std::to_string(idx));
+            print_stacktrace_and_terminate();
         }
     }
 
@@ -487,7 +489,8 @@ make_unique_vertex(const std::vector<vertex>& vertices, const std::vector<uint32
 std::pair<std::vector<vertex>, std::vector<uint32_t>>
 get_gltf_module_from_file(const std::string_view path) {
     if (const std::filesystem::path file_path(path); !is_regular_file(file_path)) {
-        throw std::runtime_error(std::format("module file '{}' does not exist", path));
+        std::println("module file '{}' does not exist", path);
+        print_stacktrace_and_terminate();
     }
 
     tinygltf::TinyGLTF loader;
@@ -497,15 +500,17 @@ get_gltf_module_from_file(const std::string_view path) {
     const auto ret = loader.LoadASCIIFromFile(&model, &err, &warn, std::string(path));
 
     if (!warn.empty()) {
-        std::cerr << "警告: " << warn << std::endl;
+        std::println("警告: {}", warn);
     }
 
     if (!err.empty()) {
-        throw std::runtime_error(std::format("错误: {}", err));
+        std::println("错误: {}", err);
+        print_stacktrace_and_terminate();
     }
 
     if (!ret) {
-        throw std::runtime_error("加载失败");
+        std::println("加载失败");
+        print_stacktrace_and_terminate();
     }
 
     std::vector<glm::vec3> positions = extract_positions(model);// 顶点位置
@@ -549,7 +554,8 @@ uint32_t find_memory_type(const uint32_t& type_filter, const VkMemoryPropertyFla
     }
 
     // 如果没有找到合适的内存类型
-    throw std::runtime_error("failed to find suitable memory type!");
+    std::println("failed to find suitable memory type!");
+    print_stacktrace_and_terminate();
 }
 
 stb_texture create_texture_image_from_file() {
@@ -558,7 +564,8 @@ stb_texture create_texture_image_from_file() {
     const VkDeviceSize image_size = texWidth * texHeight * 4;
 
     if (!pixels) {
-        throw std::runtime_error("failed to load texture image!");
+        std::println("failed to load texture image!");
+        print_stacktrace_and_terminate();
     }
     const stb_texture texture = {texWidth, texHeight, pixels, image_size};
     return texture;
@@ -580,7 +587,8 @@ buffer_resource create_buffer_from_stb(VkDevice device,
 
     VkBuffer buffer;
     if (vkCreateBuffer(device, &buffer_info, nullptr, &buffer) != VK_SUCCESS) {
-        throw std::runtime_error("无法创建缓冲区!");
+        std::println("无法创建缓冲区!");
+        print_stacktrace_and_terminate();
     }
 
     // 2. 分配内存
@@ -598,7 +606,8 @@ buffer_resource create_buffer_from_stb(VkDevice device,
     VkDeviceMemory memory;
     if (vkAllocateMemory(device, &alloc_info, nullptr, &memory) != VK_SUCCESS) {
         vkDestroyBuffer(device, buffer, nullptr);
-        throw std::runtime_error("无法分配缓冲区内存!");
+        std::println("无法分配缓冲区内存!");
+        print_stacktrace_and_terminate();
     }
 
     // 3. 绑定内存

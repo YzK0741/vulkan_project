@@ -75,7 +75,8 @@ public:
 
         std::ifstream file(filepath);
         if (!file.is_open()) {
-            throw std::runtime_error("无法打开OBJ文件: " + filepath);
+            std::println("无法打开OBJ文件: {}", filepath);
+            print_stacktrace_and_terminate();
         }
 
         std::vector<glm::vec3> positions;
@@ -151,7 +152,8 @@ public:
 
         // 验证数据
         if (model.vertices.empty()) {
-            throw std::runtime_error("没有生成任何顶点数据!");
+            std::println("没有生成任何顶点数据!");
+            print_stacktrace_and_terminate();
         }
 
         // 打印前几个顶点和索引

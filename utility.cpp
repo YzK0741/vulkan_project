@@ -10,8 +10,10 @@
 #include <exception>
 
 [[noreturn]] void print_stacktrace_and_terminate() {
+#ifndef NO_DEBUG
     std::stringstream ss;
     ss << "this is the stacktrace \n" << boost::stacktrace::stacktrace();
     std::print("{}", ss.str());
+#endif
     std::terminate();
 }

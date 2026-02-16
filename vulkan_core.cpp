@@ -119,7 +119,8 @@ VkPhysicalDevice pick_suitable_device(const VkInstance& instance, VkSurfaceKHR s
     uint32_t deviceCount = 0;
     vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
     if (deviceCount == 0) {
-        throw std::runtime_error("Failed to find GPUs with Vulkan support!");
+        std::println("Failed to find GPUs with Vulkan support!");
+        print_stacktrace_and_terminate();
     }
 
     std::vector<VkPhysicalDevice> devices(deviceCount);
@@ -147,13 +148,15 @@ VkPhysicalDevice pick_suitable_device(const VkInstance& instance, VkSurfaceKHR s
         return device; // 找到合适的设备
     }
 
-    throw std::runtime_error("Failed to find a suitable GPU!");
+    std::println("Failed to find a suitable GPU!");
+    print_stacktrace_and_terminate();
 }
 
 logical_device create_logical_device(VkPhysicalDevice physical_device,
                                  const device_creation_info& create_info) {
     if (!create_info.queue_families.is_complete()) {
-        throw std::runtime_error("Queue families not complete");
+        std::println("Queue families not complete");
+        print_stacktrace_and_terminate();
     }
 
     // 使用set收集唯一的队列族索引
@@ -206,8 +209,9 @@ logical_device create_logical_device(VkPhysicalDevice physical_device,
     VkDevice device;
     VkResult result = vkCreateDevice(physical_device, &device_create_info, nullptr, &device);
     if (result != VK_SUCCESS) {
-        throw std::runtime_error("Failed to create logical device: " +
+        std::println("Failed to create logical device: {}",
                                 std::to_string(result));
+        print_stacktrace_and_terminate();
     }
 
     // 获取队列
@@ -323,7 +327,8 @@ std::vector<char> read_file(const std::string& filename) {
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
     if (!file.is_open()) {
-        throw std::runtime_error("failed to open file: " + filename);
+        std::println("failed to open file: {}", filename);
+        print_stacktrace_and_terminate();
     }
 
     const auto fileSize = file.tellg();
@@ -345,7 +350,8 @@ VkShaderModule create_shader_module(const std::vector<char>& code, const VkDevic
 
     VkShaderModule shaderModule;
     if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
-        throw std::runtime_error("failed to create shader module!");
+        std::println("failed to create shader module!");
+        print_stacktrace_and_terminate();
     }
     return shaderModule;
 }
@@ -370,7 +376,8 @@ VkFormat find_depth_format(const VkPhysicalDevice &physical_device) {
         }
     }
 
-    throw std::runtime_error("failed to find supported depth format!");
+    std::println("failed to find supported depth format!");
+    print_stacktrace_and_terminate();
 }
 
 VkImageView create_image_view(const VkImage& image, const VkFormat& format, const VkImageAspectFlags& aspectFlags, const VkDevice& device) {
@@ -395,7 +402,8 @@ VkImageView create_image_view(const VkImage& image, const VkFormat& format, cons
 
     VkImageView imageView;
     if (vkCreateImageView(device, &viewInfo, nullptr, &imageView) != VK_SUCCESS) {
-        throw std::runtime_error("failed to create image view!");
+        std::println("failed to create image view!");
+        print_stacktrace_and_terminate();
     }
 
     return imageView;

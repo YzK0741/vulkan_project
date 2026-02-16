@@ -3,10 +3,10 @@
 #include <iostream>
 #include "vulkan_runtime.h"
 #include "obj_parser.h"
+#include "utility.h"
 
 
 int main() {
-    try {
         std::cout << "=== Vulkan OBJ加载测试 ===" << std::endl;
 
         // 提取位置和纹理坐标
@@ -24,15 +24,16 @@ int main() {
 
         // 验证数据
         if (module1.vertices.empty() || module1.indices.empty()) {
-            std::cerr << "OBJ数据为空，使用测试立方体" << std::endl;
-            throw std::runtime_error("OBJ数据为空");
+            std::println("OBJ数据为空");
+            print_stacktrace_and_terminate();
         }
 
         // 检查索引有效性
         for (const uint32_t idx : module1.indices) {
             if (idx >= module1.vertices.size()) {
-                std::cerr << "错误: 索引 " << idx << " 超出顶点范围!" << std::endl;
-                throw std::runtime_error("索引无效");
+                std::println("错误: 索引 {} 超出顶点范围!", idx);
+                std::println("索引无效");
+                print_stacktrace_and_terminate();
             }
         }
 
@@ -85,8 +86,6 @@ int main() {
             } else if (glfwGetKey(runtime.get_window(), GLFW_KEY_R) == GLFW_RELEASE) {
                 r_pressed = false;
             }
-
-            try {
                 runtime.render_frame_with_meshes();
                 frame_count++;
 
@@ -102,22 +101,9 @@ int main() {
                     last_time = current_time;
                 }
 
-            } catch (const std::exception& e) {
-                std::cerr << "\n渲染错误: " << e.what() << std::endl;
-                break;
             }
-        }
-
         std::cout << "\n\n程序正常退出" << std::endl;
         return EXIT_SUCCESS;
-
-    } catch (const std::exception& e) {
-        std::cerr << "\n=== 程序异常 ===" << std::endl;
-        std::cerr << "错误: " << e.what() << std::endl;
-        std::cout << "\n按 Enter 键退出..." << std::endl;
-        std::cin.get();
-        return EXIT_FAILURE;
-    }
 }
 
 

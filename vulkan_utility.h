@@ -8,6 +8,7 @@
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
 #include <stb/stb_image.h>
+#include "utility.h"
 
 uint32_t find_memory_type(const uint32_t& type_filter, const VkMemoryPropertyFlags& properties, const VkPhysicalDevice& physical_device);
 
@@ -143,7 +144,8 @@ public:
         vertex_buffer.vertexCount = static_cast<uint32_t>(vertices.size());
 
         if (vertices.empty()) {
-            throw std::runtime_error("顶点数据为空!");
+            std::println("顶点数据为空!");
+            print_stacktrace_and_terminate();
         }
 
         // 创建暂存缓冲区
@@ -213,7 +215,8 @@ private:
         bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         if (vkCreateBuffer(device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
-            throw std::runtime_error("无法创建缓冲区!");
+            std::println("无法创建缓冲区!");
+            print_stacktrace_and_terminate();
         }
 
         // 获取内存需求
@@ -227,7 +230,8 @@ private:
         allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
 
         if (vkAllocateMemory(device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
-            throw std::runtime_error("无法分配缓冲区内存!");
+            std::println("无法分配缓冲区内存!");
+            print_stacktrace_and_terminate();
         }
 
         // 绑定内存
@@ -245,7 +249,9 @@ private:
             }
         }
 
-        throw std::runtime_error("找不到合适的内存类型!");
+        std::println("找不到合适的内存类型!");
+        print_stacktrace_and_terminate();
+
     }
 
     void copy_buffer(const VkBuffer& srcBuffer, const VkBuffer& dstBuffer, VkDeviceSize size) const {

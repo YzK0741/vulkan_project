@@ -4,6 +4,9 @@
 
 #include <stdexcept>
 #include "vulkan_buffer.h"
+#include "utility.h"
+
+#include <ostream>
 
 uint32_t find_memory_type(
         const VkPhysicalDevice& physical_device,
@@ -20,7 +23,8 @@ uint32_t find_memory_type(
             }
     }
 
-    throw std::runtime_error("无法找到合适的内存类型!");
+    std::println("无法找到合适的内存类型!");
+    print_stacktrace_and_terminate();
 }
 
 
@@ -40,7 +44,8 @@ void create_buffer(
     buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     if (vkCreateBuffer(device, &buffer_info, nullptr, &buffer) != VK_SUCCESS) {
-        throw std::runtime_error("无法创建缓冲区!");
+        std::println("无法创建缓冲区!");
+        print_stacktrace_and_terminate();
     }
 
     VkMemoryRequirements mem_requirements;
@@ -56,7 +61,8 @@ void create_buffer(
     );
 
     if (vkAllocateMemory(device, &alloc_info, nullptr, &buffer_memory) != VK_SUCCESS) {
-        throw std::runtime_error("无法分配缓冲区内存!");
+        std::println("无法分配缓冲区内存!");
+        print_stacktrace_and_terminate();
     }
 
     vkBindBufferMemory(device, buffer, buffer_memory, 0);

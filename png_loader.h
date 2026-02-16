@@ -70,12 +70,13 @@ public:
         texture.channels = 4;
 
         if (!texture.pixel_data) {
-            throw std::runtime_error("无法加载PNG纹理文件: " + filepath);
+            std::println("无法加载PNG纹理文件: {}", filepath);
+            print_stacktrace_and_terminate();
         }
 
         if (texture.width <= 0 || texture.height <= 0) {
-            throw std::runtime_error("PNG纹理尺寸无效: " + std::to_string(texture.width) +
-                                   "x" + std::to_string(texture.height));
+            std::println("PNG纹理尺寸无效: {}x{}", std::to_string(texture.width),std::to_string(texture.height));
+            print_stacktrace_and_terminate();
         }
 
         // 计算图像大小
@@ -108,12 +109,13 @@ public:
         );
 
         if (!texture.pixel_data) {
-            throw std::runtime_error("无法从内存加载PNG纹理");
+            std::println("无法从内存加载PNG纹理");
+            print_stacktrace_and_terminate();
         }
 
         if (texture.width <= 0 || texture.height <= 0) {
-            throw std::runtime_error("PNG纹理尺寸无效: " + std::to_string(texture.width) +
-                                   "x" + std::to_string(texture.height));
+            std::println("PNG纹理尺寸无效: {}x{}", std::to_string(texture.width), std::to_string(texture.height));
+            print_stacktrace_and_terminate();
         }
 
         texture.image_size = texture.width * texture.height * texture.channels;
@@ -139,7 +141,8 @@ public:
         VkSampler& texture_sampler
     ) {
         if (!png_texture.is_valid()) {
-            throw std::runtime_error("PNG纹理数据无效，无法创建Vulkan纹理");
+            std::println("PNG纹理数据无效，无法创建Vulkan纹理");
+            print_stacktrace_and_terminate();
         }
 
         // 1. 创建临时缓冲区来传输纹理数据
@@ -259,7 +262,8 @@ private:
         image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         if (vkCreateImage(device, &image_info, nullptr, &image) != VK_SUCCESS) {
-            throw std::runtime_error("无法创建纹理图像!");
+            std::println("无法创建纹理图像!");
+            print_stacktrace_and_terminate();
         }
 
         VkMemoryRequirements mem_requirements;
@@ -275,7 +279,8 @@ private:
         );
 
         if (vkAllocateMemory(device, &alloc_info, nullptr, &image_memory) != VK_SUCCESS) {
-            throw std::runtime_error("无法分配纹理图像内存!");
+            std::println("无法分配纹理图像内存!");
+            print_stacktrace_and_terminate();
         }
 
         vkBindImageMemory(device, image, image_memory, 0);
@@ -331,7 +336,8 @@ private:
             source_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
             destination_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
         } else {
-            throw std::runtime_error("不支持的图像布局转换!");
+            std::println("不支持的图像布局转换!");
+            print_stacktrace_and_terminate();
         }
 
         vkCmdPipelineBarrier(
@@ -447,7 +453,8 @@ private:
 
         VkImageView image_view;
         if (vkCreateImageView(device, &view_info, nullptr, &image_view) != VK_SUCCESS) {
-            throw std::runtime_error("无法创建纹理图像视图!");
+            std::println("无法创建纹理图像视图!");
+            print_stacktrace_and_terminate();
         }
 
         return image_view;
@@ -474,7 +481,8 @@ private:
         sampler_info.maxLod = 0.0f;
 
         if (vkCreateSampler(device, &sampler_info, nullptr, &texture_sampler) != VK_SUCCESS) {
-            throw std::runtime_error("无法创建纹理采样器!");
+            std::println("无法创建纹理采样器!");
+            print_stacktrace_and_terminate();
         }
     }
 

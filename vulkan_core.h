@@ -162,7 +162,8 @@ struct vulkan_core {
                 case VK_ERROR_INCOMPATIBLE_DRIVER: error_msg += "VK_ERROR_INCOMPATIBLE_DRIVER"; break;
                 default: error_msg += std::to_string(static_cast<int>(result)); break;
             }
-            throw std::runtime_error(error_msg);
+            std::println("{}", error_msg);
+            print_stacktrace_and_terminate();
         }
 
         std::cout << "Vulkan实例创建成功" << std::endl;
@@ -183,7 +184,8 @@ struct vulkan_core {
 
         // 检查扩展支持
         if (!check_device_extension_support(physical_device, info.extensions)) {
-            throw std::runtime_error("Required device extensions not supported");
+            std::println("Required device extensions not supported");
+            print_stacktrace_and_terminate();
         }
 
         // 可选：启用Vulkan 1.1+特性
@@ -216,7 +218,8 @@ struct vulkan_core {
 
     void init_surface() {
         if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS) {
-            throw std::runtime_error("无法创建窗口表面");
+            std::println("无法创建窗口表面");
+            print_stacktrace_and_terminate();
         }
     }
 
@@ -230,7 +233,8 @@ struct vulkan_core {
 
         // 添加检查：
         if (swap_chain_support.formats.empty() || swap_chain_support.presentModes.empty()) {
-            throw std::runtime_error("Swap chain not adequately supported");
+            std::println("Swap chain not adequately supported");
+            print_stacktrace_and_terminate();
         }
 
         const VkSurfaceFormatKHR surface_format = choose_swap_surface_format(swap_chain_support.formats);
@@ -276,7 +280,8 @@ struct vulkan_core {
         create_info.oldSwapchain = VK_NULL_HANDLE;
 
         if (vkCreateSwapchainKHR(device, &create_info, nullptr, &this->swap_chain) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create swap chain!");
+            std::println("failed to create swap chain!");
+            print_stacktrace_and_terminate();
         }
 
 
@@ -308,7 +313,8 @@ struct vulkan_core {
             createInfo.subresourceRange.baseArrayLayer = 0;
             createInfo.subresourceRange.layerCount = 1;
             if (vkCreateImageView(device, &createInfo, nullptr, &this->swap_chain_image_views[i]) != VK_SUCCESS) {
-                throw std::runtime_error("failed to create image views!");
+                std::println("failed to create image views!");
+                print_stacktrace_and_terminate();
             }
         }
     }
@@ -342,7 +348,8 @@ struct vulkan_core {
 
         if (vkCreateImage(device, &imageInfo, nullptr, &image) != VK_SUCCESS) {
             vkDestroyImage(device, image, nullptr);
-            throw std::runtime_error("failed to create depth image!");
+            std::println("failed to create depth image!");
+            print_stacktrace_and_terminate();
         }
 
         // 2. 分配内存
@@ -356,7 +363,8 @@ struct vulkan_core {
                                                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, this->physical_device);
 
         if (vkAllocateMemory(device, &allocInfo, nullptr, &imageMemory) != VK_SUCCESS) {
-            throw std::runtime_error("failed to allocate depth image memory!");
+            std::println("failed to allocate depth image memory!");
+            print_stacktrace_and_terminate();
         }
 
         vkBindImageMemory(device, image, imageMemory, 0);
@@ -374,7 +382,8 @@ struct vulkan_core {
         viewInfo.subresourceRange.layerCount = 1;
 
         if (vkCreateImageView(device, &viewInfo, nullptr, &imageView) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create depth image view!");
+            std::println("failed to create depth image view!");
+            print_stacktrace_and_terminate();
         }
     }
 
@@ -383,7 +392,8 @@ struct vulkan_core {
 
         // 先测试深度格式是否有效
         if (depth_format == VK_FORMAT_UNDEFINED) {
-            throw std::runtime_error("无法找到支持的深度格式");
+            std::println("无法找到支持的深度格式");
+            print_stacktrace_and_terminate();
         }
 
         depth_images.resize(swap_chain_image_views.size());
@@ -504,7 +514,8 @@ struct vulkan_core {
         renderPassInfo.pDependencies = dependencies.data();
 
         if (vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderpass) != VK_SUCCESS) {
-            throw std::runtime_error("无法创建渲染通道!");
+            std::println("无法创建渲染通道!");
+            print_stacktrace_and_terminate();
         }
     }
 
@@ -540,7 +551,8 @@ struct vulkan_core {
             framebuffer_create_info.layers = 1;
 
             if (vkCreateFramebuffer(this->device, &framebuffer_create_info, nullptr, &this->swap_chain_framebuffers[i]) != VK_SUCCESS) {
-                throw std::runtime_error("无法创建帧缓冲区!");
+                std::println("无法创建帧缓冲区!");
+                print_stacktrace_and_terminate();
             }
         }
     }
@@ -555,7 +567,8 @@ struct vulkan_core {
         poolInfo.queueFamilyIndex = graphics_family_index;
 
         if (vkCreateCommandPool(device, &poolInfo, nullptr, &command_pool) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create command pool!");
+            std::println("failed to create command pool!");
+            print_stacktrace_and_terminate();
         }
     }
 
@@ -653,7 +666,8 @@ struct vulkan_core {
         pipeline_layout_info.pPushConstantRanges = nullptr;
 
         if (vkCreatePipelineLayout(this->device, &pipeline_layout_info, nullptr, &this->pipeline_layout) != VK_SUCCESS) {
-            throw std::runtime_error("failed to create pipeline layout!");
+            std::println("failed to create pipeline layout!");
+            print_stacktrace_and_terminate();
         }
     }
 
@@ -683,7 +697,8 @@ struct vulkan_core {
         layout_info.pBindings = bindings.data();
 
         if (vkCreateDescriptorSetLayout(device, &layout_info, nullptr, &descriptor_set_layout) != VK_SUCCESS) {
-            throw std::runtime_error("无法创建描述符集布局!");
+            std::println("无法创建描述符集布局!");
+            print_stacktrace_and_terminate();
         }
     }
 
@@ -707,7 +722,8 @@ struct vulkan_core {
         info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
         info.pPoolSizes = pool_sizes.data();
         if (vkCreateDescriptorPool(this->device, &info, nullptr, &this->descriptor_pool)) {
-            throw std::runtime_error("failed in creating descriptor pool");
+            std::println("failed in creating descriptor pool");
+            print_stacktrace_and_terminate();
         }
     }
 
@@ -727,7 +743,8 @@ struct vulkan_core {
         allocInfo.commandBufferCount = static_cast<uint32_t>(command_buffers.size());
 
         if (vkAllocateCommandBuffers(device, &allocInfo, command_buffers.data()) != VK_SUCCESS) {
-            throw std::runtime_error("无法分配命令缓冲区!");
+            std::println("无法分配命令缓冲区!");
+            print_stacktrace_and_terminate();
         }
     }
 
@@ -766,7 +783,8 @@ struct vulkan_core {
             if (vkCreateSemaphore(device, &semaphore_info, nullptr, &image_available_semaphores[i]) != VK_SUCCESS ||
                 vkCreateSemaphore(device, &semaphore_info, nullptr, &render_finished_semaphores[i]) != VK_SUCCESS ||
                 vkCreateFence(device, &fence_info, nullptr, &in_flight_fences[i]) != VK_SUCCESS) {
-                throw std::runtime_error("failed to create synchronization objects for a frame!");
+                    std::println("failed to create synchronization objects for a frame!");
+                    print_stacktrace_and_terminate();
                 }
         }
     }
@@ -977,7 +995,8 @@ struct vulkan_core {
         imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
         if (vkCreateImage(device, &imageInfo, nullptr,  &image) != VK_SUCCESS) {
-            throw std::runtime_error("无法创建MSAA图像!");
+            std::println("无法创建MSAA图像!");
+            print_stacktrace_and_terminate();
         }
 
         VkMemoryRequirements memRequirements;
@@ -993,7 +1012,8 @@ struct vulkan_core {
         );
 
         if (vkAllocateMemory(device, &allocInfo, nullptr, &imageMemory) != VK_SUCCESS) {
-            throw std::runtime_error("无法分配MSAA图像内存!");
+            std::println("无法分配MSAA图像内存!");
+            print_stacktrace_and_terminate();
         }
 
         vkBindImageMemory(device, image, imageMemory, 0);
@@ -1027,7 +1047,6 @@ struct vulkan_core {
     }
 
     vulkan_core() {
-        try {
             std::cout << "开始Vulkan初始化..." << std::endl;
 
             this->init_window();
@@ -1091,12 +1110,7 @@ struct vulkan_core {
             this->create_sync_objects();
             std::cout << "同步对象创建完成" << std::endl;
 
-            std::cout << "Vulkan初始化成功!" << std::endl;
-        } catch (...) {
-            std::cerr << "Vulkan初始化失败" << std::endl;
-            cleanup();
-            throw;
-        }
+            std::println("Vulkan初始化成功!");
     }
 
     ~vulkan_core() {
@@ -1151,7 +1165,8 @@ struct vulkan_core {
         submit_info.pSignalSemaphores = signal_semaphores;
 
         if (vkQueueSubmit(graphics_queue, 1, &submit_info, in_flight_fences[current_frame]) != VK_SUCCESS) {
-            throw std::runtime_error("无法提交绘制命令缓冲区!");
+            std::println("无法提交绘制命令缓冲区!");
+            print_stacktrace_and_terminate();
         }
     }
 
@@ -1182,15 +1197,18 @@ struct vulkan_core {
 
         // 1. 验证成员变量有效性
         if (this->device == VK_NULL_HANDLE) {
-            throw std::runtime_error("Vulkan device is not initialized");
+            std::println("Vulkan device is not initialized");
+            print_stacktrace_and_terminate();
         }
 
         if (this->command_pool == VK_NULL_HANDLE) {
-            throw std::runtime_error("Command pool is not initialized");
+            std::println("Command pool is not initialized");
+            print_stacktrace_and_terminate();
         }
 
         if (this->graphics_queue == VK_NULL_HANDLE) {
-            throw std::runtime_error("Graphics queue is not initialized");
+            std::println("Graphics queue is not initialized");
+            print_stacktrace_and_terminate();
         }
 
         // 2. 完全初始化的分配信息结构体
@@ -1205,7 +1223,8 @@ struct vulkan_core {
         VkResult result = vkAllocateCommandBuffers(this->device, &allocate_info, &command_buffer);
 
         if (result != VK_SUCCESS) {
-            throw std::runtime_error("Failed to allocate command buffer for buffer copy");
+            std::println("Failed to allocate command buffer for buffer copy");
+            print_stacktrace_and_terminate();
         }
 
         // 3. 完全初始化的开始信息结构体
@@ -1218,7 +1237,8 @@ struct vulkan_core {
         result = vkBeginCommandBuffer(command_buffer, &begin_info);
         if (result != VK_SUCCESS) {
             vkFreeCommandBuffers(this->device, this->command_pool, 1, &command_buffer);
-            throw std::runtime_error("Failed to begin command buffer");
+            std::println("Failed to begin command buffer");
+            print_stacktrace_and_terminate();
         }
 
         // 4. 完全初始化的缓冲区拷贝结构体
@@ -1232,7 +1252,8 @@ struct vulkan_core {
         result = vkEndCommandBuffer(command_buffer);
         if (result != VK_SUCCESS) {
             vkFreeCommandBuffers(this->device, this->command_pool, 1, &command_buffer);
-            throw std::runtime_error("Failed to end command buffer");
+            std::println("Failed to end command buffer");
+            print_stacktrace_and_terminate();
         }
 
         // 5. 完全初始化的提交信息结构体
@@ -1250,64 +1271,21 @@ struct vulkan_core {
         result = vkQueueSubmit(this->graphics_queue, 1, &submit_info, VK_NULL_HANDLE);
         if (result != VK_SUCCESS) {
             vkFreeCommandBuffers(this->device, this->command_pool, 1, &command_buffer);
-            throw std::runtime_error("Failed to submit copy command to queue");
+            std::println("Failed to submit copy command to queue");
+            print_stacktrace_and_terminate();
         }
 
         // 6. 等待队列完成
         result = vkQueueWaitIdle(this->graphics_queue);
         if (result != VK_SUCCESS) {
             vkFreeCommandBuffers(this->device, this->command_pool, 1, &command_buffer);
-            throw std::runtime_error("Failed to wait for queue idle");
+            std::println("Failed to wait for queue idle");
+            print_stacktrace_and_terminate();
         }
 
         // 7. 清理命令缓冲区
         vkFreeCommandBuffers(this->device, this->command_pool, 1, &command_buffer);
     }
-    /* void draw_frame() {
-        // 1. 等待前一帧完成（使用栅栏）
-        this->wait_for_fences();
-
-        // 2. 从交换链获取下一张图像
-        uint32_t image_index;
-        VkResult result;
-        get_image_index(image_index, result);
-
-        // 3. 检查是否需要重建交换链
-        if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-            recreate_swap_chain();
-            return;
-        } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-            throw std::runtime_error("无法获取交换链图像!");
-        }
-
-        // 4. 检查当前图像是否正在使用
-        this->wait_usable_image(image_index);
-
-        // 5. 重置栅栏（准备新的一帧）
-        vkResetFences(device, 1, &in_flight_fences[current_frame]);
-
-        // 6. 记录命令缓冲区（这里需要实际实现）
-        record_command_buffer(command_buffers[current_frame], image_index);
-
-        // 7. 提交命令缓冲区
-        submit_cmd_buffer();
-
-        const VkSemaphore signal_semaphores[] = {render_finished_semaphores[current_frame]};
-
-        // 8. 呈现图像
-        result = present_image(signal_semaphores, image_index);
-
-        // 9. 检查交换链是否需要重建
-        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebuffer_resized) {
-            framebuffer_resized = false;
-            recreate_swap_chain();
-        } else if (result != VK_SUCCESS) {
-            throw std::runtime_error("无法呈现交换链图像!");
-        }
-
-        // 10. 前进到下一帧
-        go_to_next_frame();
-    } */
     // 禁用拷贝
     vulkan_core(const vulkan_core&) = delete;
     vulkan_core& operator=(const vulkan_core&) = delete;
