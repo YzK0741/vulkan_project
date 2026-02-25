@@ -6,7 +6,7 @@
 #define VULKAN_PROJECT_VULKAN_RUNTIME_H
 
 //#include <stb/stb_image_write.h>
-
+#include <thread>
 #include "vulkan_core.h"
 #include "vulkan_utility.h"
 #include "png_loader.h"
@@ -459,10 +459,101 @@ struct vulkan_texture {
         }
 };
 
+struct vulkan_uniform_buffers {
+    std::vector<VkBuffer> uniform_buffers;
+    std::vector<VkDeviceMemory> uniform_buffers_memory;
+    std::vector<void*> uniform_buffers_mapped;
+    std::function<void(uniform_buffer_object&, const vulkan_core&)> update_mvp = [](uniform_buffer_object& ubo, const vulkan_core& core) {
+        // 1. 模型矩阵：根据您的模型大小调整
+        static float angle = 0.0f;
+        angle += glm::radians(1.0f);  // 每秒旋转
+
+        ubo.model = glm::mat4(1.0f);
+        ubo.model = glm::scale(ubo.model, glm::vec3(2.0f,  2.0f, 2.0f));  // 缩放
+
+        // 修正旋转：将模型的Z轴向上转为Y轴向上
+        ubo.model = glm::rotate(ubo.model, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+
+        // 2. 向下平移（注意坐标系方向！）
+        //ubo.model = glm::translate(ubo.model, glm::vec3(0.0f, -1.0f, 0.0f));  // 向下移动1个单位
+
+        ubo.model = glm::rotate(ubo.model, angle, glm::vec3(0.0f, 0.0f, 1.0f));  // 持续旋转
+
+        // 2. 视图矩阵：调整相机位置
+        ubo.view = glm::lookAt(
+            glm::vec3(3.0f, 3.0f, 3.0f),  // 相机位置
+            glm::vec3(0.0f, 0.0f, 0.0f),  // 观察目标
+            glm::vec3(0.0f, 0.0f, 1.0f)   // 上方向（Z轴向上）
+        );
+
+        // 3. 投影矩阵
+        ubo.proj = glm::perspective(
+            glm::radians(60.0f),  // 视野角度
+            static_cast<float>(core.swap_chain_extent.width) /
+                        static_cast<float>(core.swap_chain_extent.height),
+            0.1f,    // 近平面
+            100.0f   // 远平面
+        );
+
+        // Vulkan的Y轴是向下的，需要翻转
+        ubo.proj[1][1] *= -1;
+    };
+    void update_uniform_buffer(const uint32_t current_image, const vulkan_core& core) const {
+        uniform_buffer_object ubo{};
+        update_mvp(ubo, core);
+        // 复制数据
+        if (current_image < uniform_buffers_mapped.size()) {
+            memcpy(uniform_buffers_mapped[current_image], &ubo, sizeof(ubo));
+        }
+    }
+    static std::function<void(uniform_buffer_object&, const vulkan_core&)> get_default_mvp_method() {
+        return [](uniform_buffer_object& ubo, const vulkan_core& core) {
+            // 1. 模型矩阵：根据您的模型大小调整
+            static float angle = 0.0f;
+            angle += glm::radians(1.0f);  // 每秒旋转
+
+            ubo.model = glm::mat4(1.0f);
+            ubo.model = glm::scale(ubo.model, glm::vec3(2.0f,  2.0f, 2.0f));  // 缩放
+
+            // 修正旋转：将模型的Z轴向上转为Y轴向上
+            ubo.model = glm::rotate(ubo.model, glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 0.1f));
+
+            // 2. 向下平移（注意坐标系方向！）
+            //ubo.model = glm::translate(ubo.model, glm::vec3(0.0f, -1.0f, 0.0f));  // 向下移动1个单位
+
+            ubo.model = glm::rotate(ubo.model, angle, glm::vec3(0.0f, 0.0f, 1.0f));  // 持续旋转
+
+            // 2. 视图矩阵：调整相机位置
+            ubo.view = glm::lookAt(
+                glm::vec3(3.0f, 3.0f, 3.0f),  // 相机位置
+                glm::vec3(0.0f, 0.0f, 0.0f),  // 观察目标
+                glm::vec3(0.0f, 0.0f, 1.0f)   // 上方向（Z轴向上）
+            );
+
+            // 3. 投影矩阵
+            ubo.proj = glm::perspective(
+                glm::radians(60.0f),  // 视野角度
+                static_cast<float>(core.swap_chain_extent.width) /
+                            static_cast<float>(core.swap_chain_extent.height),
+                0.1f,    // 近平面
+                100.0f   // 远平面
+            );
+
+            // Vulkan的Y轴是向下的，需要翻转
+            ubo.proj[1][1] *= -1;
+        };
+    }
+};
+
 struct vulkan_renderable_object {
     vulkan_mesh_buffer mesh;
     vulkan_texture texture;
+    vulkan_uniform_buffers uniform_buffers;
     VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+
+    void change_mvp_method(std::function<void(uniform_buffer_object&, const vulkan_core&)> method) {
+        this->uniform_buffers.update_mvp = std::move(method);
+    }
 };
 
 class vulkan_runtime {
@@ -478,16 +569,11 @@ class vulkan_runtime {
     VkDeviceMemory texture_image_memory = VK_NULL_HANDLE;
     VkImageView texture_image_view = VK_NULL_HANDLE;
     VkSampler texture_sampler = VK_NULL_HANDLE;
-    VkDescriptorSet descriptor_set = VK_NULL_HANDLE;  // 添加描述符集
+    VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
 
     // 管线相关
     VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
     VkPipeline graphics_pipeline = VK_NULL_HANDLE;
-
-    std::vector<uint8_t> saved_texture_pixels; // 保存原始像素数据
-    uint32_t saved_texture_width = 0;
-    uint32_t saved_texture_height = 0;
-    int saved_texture_channels = 0;
 
     // Uniform Buffer相关
     std::vector<VkBuffer> uniform_buffers;
@@ -728,19 +814,16 @@ public:
           creator(core.device, core.physical_device, core.command_pool, core.graphics_queue),
           vertex_buffer(core.device),
           index_buffer(core.device) {
-              // 初始化描述符集
-        create_uniform_buffers();
-
         // 创建单一的全局管线
         graphics_pipeline = create_mesh_pipeline();
         create_pipeline_layout();
     }
 
-    void add_object(const std::vector<glm::vec3>& positions,
+    vulkan_renderable_object& add_object(const std::vector<glm::vec3>& positions,
                     const std::vector<glm::vec3>& normals,
                     const std::vector<glm::vec2>& tex_coords,  // 纹理坐标
                     const std::vector<uint32_t>& indexes,
-                    const std::string& path = "") {
+                    const std::string_view path = "") {
         vulkan_renderable_object object = {vulkan_mesh_buffer(this->core, positions, normals, tex_coords, indexes)};
 
         // 创建纹理资源
@@ -758,7 +841,7 @@ public:
             texture_sampler = VK_NULL_HANDLE;
             std::cout << "纹理资源创建成功，尺寸: " << stb_texture1.width << "x" << stb_texture1.height << std::endl;
         } else {
-            load_png_texture(path);
+            load_png_texture(path.data());
             texture.texture_image = texture_image;
             texture.texture_image_memory = texture_image_memory;
             texture.texture_image_view = texture_image_view;
@@ -769,14 +852,92 @@ public:
             texture_sampler = VK_NULL_HANDLE;
         }
 
+        create_uniform_buffers();
+        object.uniform_buffers.uniform_buffers = std::move(this->uniform_buffers);
+        object.uniform_buffers.uniform_buffers_mapped = std::move(this->uniform_buffers_mapped);
+        object.uniform_buffers.uniform_buffers_memory = std::move(this->uniform_buffers_memory);
+
         object.texture = texture;
-        object.descriptor_set = make_descriptor_sets();
+        object.descriptor_set = make_descriptor_sets(object.uniform_buffers.uniform_buffers[0]);
         object.texture.update_to_descriptor_set(core.device,object.descriptor_set);
 
         this->objects.push_back(std::move(object));
+        return *(this->objects.end() - 1);
     }
 
-    void update_uniform_buffer(uint32_t current_image) const {
+    vulkan_renderable_object& add_object(const std::vector<vertex>& vertices, const std::vector<uint32_t>& indexes, const std::string_view path = "") {
+        std::vector<glm::vec3> positions;
+        std::vector<glm::vec3> normals;
+        std::vector<glm::vec2> tex_coords;
+
+        for (const auto&[position, normal, tex_coord] : vertices) {
+            positions.push_back(position);
+            normals.push_back(normal);
+            tex_coords.push_back(tex_coord);
+        }
+
+
+        return this->add_object(positions, normals, tex_coords, indexes, "");
+    }
+
+    vulkan_renderable_object& add_object(const std::vector<vertex>& vertices,
+        const std::vector<uint32_t>& indexes,
+        const std::vector<unsigned char>& texture_data = {},
+        int width = 0,
+        int height = 0,
+        VkFormat format = VK_FORMAT_UNDEFINED
+        ) {
+        std::vector<glm::vec3> positions;
+        std::vector<glm::vec3> normals;
+        std::vector<glm::vec2> tex_coords;
+
+        for (const auto&[position, normal, tex_coord] : vertices) {
+            positions.push_back(position);
+            normals.push_back(normal);
+            tex_coords.push_back(tex_coord);
+        }
+
+        vulkan_renderable_object object = {vulkan_mesh_buffer(this->core, positions, normals, tex_coords, indexes)};
+
+        vulkan_texture texture;
+        if (texture_data.empty()) {
+            const stb_texture stb_texture1 = create_default_texture();
+            create_texture_from_stb(stb_texture1);
+            texture.texture_image = texture_image;
+            texture.texture_image_memory = texture_image_memory;
+            texture.texture_image_view = texture_image_view;
+            texture.texture_sampler = texture_sampler;
+            texture_image = VK_NULL_HANDLE;
+            texture_image_memory = VK_NULL_HANDLE;
+            texture_image_view = VK_NULL_HANDLE;
+            texture_sampler = VK_NULL_HANDLE;
+        } else {
+            create_vulkan_texture(texture_data, width, height, format);
+            texture.texture_image = texture_image;
+            texture.texture_image_memory = texture_image_memory;
+            texture.texture_image_view = texture_image_view;
+            texture.texture_sampler = texture_sampler;
+            texture_image = VK_NULL_HANDLE;
+            texture_image_memory = VK_NULL_HANDLE;
+            texture_image_view = VK_NULL_HANDLE;
+            texture_sampler = VK_NULL_HANDLE;
+        }
+
+        create_uniform_buffers();
+        object.uniform_buffers.uniform_buffers = std::move(this->uniform_buffers);
+        object.uniform_buffers.uniform_buffers_mapped = std::move(this->uniform_buffers_mapped);
+        object.uniform_buffers.uniform_buffers_memory = std::move(this->uniform_buffers_memory);
+
+        object.texture = texture;
+        object.descriptor_set = make_descriptor_sets(object.uniform_buffers.uniform_buffers[0]);
+        object.texture.update_to_descriptor_set(core.device,object.descriptor_set);
+
+        this->objects.push_back(std::move(object));
+
+        return *(objects.end() - 1);
+    }
+
+    void update_uniform_buffer(const uint32_t current_image) const {
         uniform_buffer_object ubo{};
 
         // 1. 模型矩阵：根据您的模型大小调整
@@ -842,13 +1003,6 @@ public:
 
     // 从PNG纹理数据加载
     void load_png_texture_from_data(const png_texture_data& texture_data) {
-        saved_texture_pixels.assign(
-        texture_data.pixel_data,
-        texture_data.pixel_data + texture_data.image_size
-    );
-        saved_texture_width = texture_data.width;
-        saved_texture_height = texture_data.height;
-        saved_texture_channels = texture_data.channels;
             // 创建Vulkan纹理资源
             png_texture_loader::create_vulkan_texture(
                 core.device,
@@ -865,7 +1019,19 @@ public:
             update_descriptor_sets();  // 更新描述符集
             std::cout << "PNG纹理从数据加载成功" << std::endl;
     }
-    void render_frame_with_meshes() {
+
+    void render_frame_with_objects() {
+        int width = 0;
+        int height = 0;
+        glfwGetFramebufferSize(core.window, &width, &height);
+
+        if (width == 0 || height == 0) {
+            using namespace std::chrono_literals;
+            std::this_thread::sleep_for(16ms);
+            return;
+        }
+
+
         // 1. 等待前一帧
         core.wait_for_fences();
 
@@ -879,8 +1045,9 @@ public:
             core.recreate_swap_chain();
             return;
         } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-            std::println("无法获取交换链图像!");
+            std::println(stderr,"无法获取交换链图像!");
             print_stacktrace_and_terminate();
+
         }
 
         // 3. 等待图像可用
@@ -888,10 +1055,10 @@ public:
         core.reset_fences();
 
         // 4. 更新Uniform Buffer
-        update_uniform_buffer(image_index);
+        //update_uniform_buffer(image_index);
 
         // 5. 记录命令缓冲区 - 使用mesh渲染
-        record_command_buffer_with_meshes(image_index);
+        record_command_buffer_with_objects(image_index);
 
 
         // 6. 提交并呈现
@@ -933,29 +1100,29 @@ private:
         // 分配描述符集
         VkDescriptorSetAllocateInfo alloc_info{};
         alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        alloc_info.descriptorPool = core.descriptor_pool; // 假设core中有descriptor_pool
+        alloc_info.descriptorPool = core.descriptor_pool;
         alloc_info.descriptorSetCount = 1;
-        alloc_info.pSetLayouts = &core.descriptor_set_layout; // 假设core中有descriptor_set_layouts
+        alloc_info.pSetLayouts = &core.descriptor_set_layout;
 
         if (vkAllocateDescriptorSets(core.device, &alloc_info, &descriptor_set) != VK_SUCCESS) {
-            std::println("无法分配描述符集!");
+            std::println(stderr,"无法分配描述符集!");
         }
     }
 
-    [[nodiscard]] VkDescriptorSet make_descriptor_sets() const {
+    [[nodiscard]] VkDescriptorSet make_descriptor_sets(const VkBuffer& uniform_buffer) const {
         if (!core.descriptor_set_layout) {
             return VK_NULL_HANDLE;
         }
 
         // 分配描述符集
-        VkDescriptorSet descriptor_set;
+        VkDescriptorSet descriptor_set_;
         VkDescriptorSetAllocateInfo alloc_info{};
         alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         alloc_info.descriptorPool = core.descriptor_pool;
         alloc_info.descriptorSetCount = 1;
         alloc_info.pSetLayouts = &core.descriptor_set_layout;
 
-        if (vkAllocateDescriptorSets(core.device, &alloc_info, &descriptor_set) != VK_SUCCESS) {
+        if (vkAllocateDescriptorSets(core.device, &alloc_info, &descriptor_set_) != VK_SUCCESS) {
             std::println("无法分配描述符集!");
             print_stacktrace_and_terminate();
         }
@@ -965,12 +1132,12 @@ private:
 
         // 1. Uniform Buffer描述符
         VkDescriptorBufferInfo buffer_info{};
-        buffer_info.buffer = uniform_buffers[0];  // 使用第一个uniform buffer
+        buffer_info.buffer = uniform_buffer;  // 使用第一个uniform buffer
         buffer_info.offset = 0;
         buffer_info.range = sizeof(uniform_buffer_object);
 
         descriptor_writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptor_writes[0].dstSet = descriptor_set;
+        descriptor_writes[0].dstSet = descriptor_set_;
         descriptor_writes[0].dstBinding = 0;  // binding 0: UBO
         descriptor_writes[0].dstArrayElement = 0;
         descriptor_writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -979,7 +1146,7 @@ private:
 
         // 2. 纹理描述符（暂时为空，稍后由纹理自己填充）
         descriptor_writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptor_writes[1].dstSet = descriptor_set;
+        descriptor_writes[1].dstSet = descriptor_set_;
         descriptor_writes[1].dstBinding = 1;  // binding 1: 纹理
         descriptor_writes[1].dstArrayElement = 0;
         descriptor_writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -989,7 +1156,7 @@ private:
         // 更新描述符集（先只更新UBO，纹理稍后）
         vkUpdateDescriptorSets(core.device, 1, &descriptor_writes[0], 0, nullptr);
 
-        return descriptor_set;
+        return descriptor_set_;
     }
 
 
@@ -1506,7 +1673,7 @@ private:
         }
     }
 
-    void record_command_buffer_with_meshes(const uint32_t image_index) const {
+    void record_command_buffer_with_objects(const uint32_t image_index) const {
         VkCommandBuffer cmd_buffer = core.command_buffers[core.current_frame];
 
         VkCommandBufferBeginInfo begin_info{};
@@ -1555,7 +1722,8 @@ private:
 
 
         // 5. 遍历并绘制所有对象
-        for (const auto& object : objects) {
+        for (auto& object : objects) {
+            object.uniform_buffers.update_uniform_buffer(image_index, this->core);
             // 绑定描述符集 - 每个对象有自己的描述符集
             if (object.descriptor_set != VK_NULL_HANDLE) {
                 vkCmdBindDescriptorSets(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -1587,6 +1755,118 @@ private:
         }
     }
 
+
+    void create_vulkan_texture(
+        const std::vector<unsigned char>& texture,
+        const int width,
+        const int height,
+        const VkFormat format
+    ) {
+        if (texture.empty()) {
+            std::println("纹理数据无效，无法创建Vulkan纹理");
+            print_stacktrace_and_terminate();
+        }
+
+        // 1. 创建临时缓冲区来传输纹理数据
+        VkBuffer staging_buffer;
+        VkDeviceMemory staging_buffer_memory;
+
+        create_buffer(
+            core.device,
+            core.physical_device,
+            texture.size(),
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            staging_buffer,
+            staging_buffer_memory
+        );
+
+        // 2. 复制纹理数据到暂存缓冲区
+        void* data;
+        vkMapMemory(core.device, staging_buffer_memory, 0, texture.size(), 0, &data);
+        memcpy(data, texture.data(), texture.size());
+        vkUnmapMemory(core.device, staging_buffer_memory);
+
+        // 3. 创建纹理图像
+        create_texture_image(
+            core.device,
+            core.physical_device,
+            width,
+            height,
+            format,
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            texture_image,
+            texture_image_memory
+        );
+
+        // 4. 从暂存缓冲区复制到纹理图像
+        transition_image_layout(
+            core.device,
+            core.command_pool,
+            core.graphics_queue,
+            texture_image,
+            format,  // 根据实际格式调整
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+        );
+
+        copy_buffer_to_image(
+            core.device,
+            core.command_pool,
+            core.graphics_queue,
+            staging_buffer,
+            texture_image,
+            static_cast<uint32_t>(width),
+            static_cast<uint32_t>(height)
+        );
+
+        // 5. 转换纹理图像到着色器可读状态
+        transition_image_layout(
+            core.device,
+            core.command_pool,
+            core.graphics_queue,
+            texture_image,
+            format,  // 根据实际格式调整
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        );
+
+        // 6. 清理暂存缓冲区
+        vkDestroyBuffer(core.device, staging_buffer, nullptr);
+        vkFreeMemory(core.device, staging_buffer_memory, nullptr);
+
+        // 7. 创建图像视图
+        texture_image_view = create_image_view(
+            core.device,
+            texture_image,
+            format,
+            VK_IMAGE_ASPECT_COLOR_BIT
+        );
+        // 8. 创建纹理采样器
+        VkSamplerCreateInfo sampler_info{};
+        sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        sampler_info.magFilter = VK_FILTER_LINEAR;
+        sampler_info.minFilter = VK_FILTER_LINEAR;
+        sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_info.anisotropyEnable = VK_TRUE;
+        sampler_info.maxAnisotropy = 16;
+        sampler_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        sampler_info.unnormalizedCoordinates = VK_FALSE;
+        sampler_info.compareEnable = VK_FALSE;
+        sampler_info.compareOp = VK_COMPARE_OP_ALWAYS;
+        sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        sampler_info.mipLodBias = 0.0f;
+        sampler_info.minLod = 0.0f;
+        sampler_info.maxLod = 0.0f;
+        if (vkCreateSampler(core.device, &sampler_info, nullptr, &texture_sampler) != VK_SUCCESS) {
+            std::println("无法创建纹理采样器!");
+            print_stacktrace_and_terminate();
+        }
+    }
 public:
     // 禁用拷贝
     vulkan_runtime(const vulkan_runtime&) = delete;

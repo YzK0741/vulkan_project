@@ -706,19 +706,19 @@ struct vulkan_core {
 
     void create_descriptor_pool() {
         std::vector<VkDescriptorPoolSize> pool_sizes;
-
+        constexpr int max_size = 1024;
         pool_sizes.push_back({
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 100
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, max_size
         });
 
         pool_sizes.push_back({
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 100
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, max_size
         });
 
         VkDescriptorPoolCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-        info.maxSets = 100;
+        info.maxSets = max_size;
         info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
         info.pPoolSizes = pool_sizes.data();
         if (vkCreateDescriptorPool(this->device, &info, nullptr, &this->descriptor_pool)) {

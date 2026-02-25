@@ -14,6 +14,7 @@
 #include <glm/glm.hpp>
 
 #include "vulkan_utility.h"
+#include "module.h"
 
 // OBJ顶点索引结构
 struct obj_vertex_index {
@@ -49,29 +50,15 @@ private:
     }
 };
 
-// OBJ模型数据结构
-struct obj_model_data {
-    std::vector<vertex> vertices;
-    std::vector<uint32_t> indices;
 
-    obj_model_data() = default;
-
-    void clear() {
-        vertices.clear();
-        indices.clear();
-    }
-
-    [[nodiscard]] size_t vertex_count() const { return vertices.size(); }
-    [[nodiscard]] size_t index_count() const { return indices.size(); }
-};
 
 // OBJ文件加载器类
 class obj_loader {
 public:
-    static obj_model_data load_from_file(const std::string& filepath) {
+    static model_data load_from_file(const std::string& filepath) {
         std::cout << "加载OBJ文件: " << filepath << std::endl;
 
-        obj_model_data model;
+        model_data model;
 
         std::ifstream file(filepath);
         if (!file.is_open()) {
@@ -215,7 +202,7 @@ private:
         const std::vector<glm::vec3>& positions,
         const std::vector<glm::vec2>& texcoords,
         const std::vector<glm::vec3>& normals,
-        obj_model_data& model,
+        model_data& model,
         std::unordered_map<obj_vertex_index, uint32_t>& vertex_cache) {
 
         // 检查是否已存在此顶点

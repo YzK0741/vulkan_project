@@ -1,6 +1,6 @@
 #include "obj_parser.h"
 
-void print_model_info(const obj_model_data& model) {
+void print_model_info(const model_data& model) {
     std::cout << "=== 模型信息 ===" << std::endl;
     std::cout << "顶点数量: " << model.vertices.size() << std::endl;
     std::cout << "索引数量: " << model.indices.size() << std::endl;
