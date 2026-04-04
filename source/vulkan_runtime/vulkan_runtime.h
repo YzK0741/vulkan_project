@@ -7,10 +7,10 @@
 
 //#include <stb/stb_image_write.h>
 #include <thread>
-#include "vulkan_core.h"
-#include "vulkan_utility.h"
-#include "png_loader.h"
-#include "vulkan_buffer.h"
+#include "../vulkan_core/vulkan_core.h"
+#include "../vulkan_core/vulkan_utility.h"
+#include "../loader/png_loader.h"
+#include "../vulkan_core/vulkan_buffer.h"
 
 struct vulkan_mesh_buffer {
 private:
@@ -590,7 +590,7 @@ class vulkan_runtime {
         uniform_buffers_mapped.resize(core.swap_chain_images.size());
 
         for (size_t i = 0; i < core.swap_chain_images.size(); i++) {
-            VkDeviceSize buffer_size = sizeof(uniform_buffer_object);
+            constexpr VkDeviceSize buffer_size = sizeof(uniform_buffer_object);
             create_buffer(
                 core.device,
                 core.physical_device,
@@ -646,7 +646,7 @@ class vulkan_runtime {
     }
 
     // 为特定网格创建管线
-    [[nodiscard]] VkPipeline create_mesh_pipeline() {
+    [[nodiscard]] VkPipeline create_pipeline() {
         // 1. 验证核心对象
         if (core.device == VK_NULL_HANDLE) {
             std::println("Vulkan device is not initialized");
@@ -815,7 +815,7 @@ public:
           vertex_buffer(core.device),
           index_buffer(core.device) {
         // 创建单一的全局管线
-        graphics_pipeline = create_mesh_pipeline();
+        graphics_pipeline = create_pipeline();
         create_pipeline_layout();
     }
 

@@ -278,36 +278,45 @@ VkExtent2D choose_swap_extent(const VkSurfaceCapabilitiesKHR& capabilities, GLFW
 }
 
 swap_chain_support_details query_swap_chain_support(const VkPhysicalDevice& device, const VkSurfaceKHR& surface) {
-    swap_chain_support_details details;
+    swap_chain_support_details details = {};
 
     // 1. 查询表面能力
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities);
 
     // 2. 查询表面格式
-    uint32_t formatCount;
-    vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, nullptr);
-    if (formatCount != 0) {
-        details.formats.resize(formatCount);
-        vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, details.formats.data());
+    uint32_t format_count;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &format_count, nullptr);
+    if (format_count != 0) {
+        details.formats.resize(format_count);
+        vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &format_count, details.formats.data());
     }
 
     // 3. 查询呈现模式
-    uint32_t presentModeCount;
-    vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, nullptr);
-    if (presentModeCount != 0) {
-        details.presentModes.resize(presentModeCount);
-        vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, details.presentModes.data());
+    uint32_t present_mode_count = 0;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &present_mode_count, nullptr);
+    if (present_mode_count != 0) {
+        details.present_modes.resize(present_mode_count);
+        vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &present_mode_count, details.present_modes.data());
     }
 
+    std::print("present modes count: {} \n", details.present_modes.size());
+
+    /*
+     * @hack: if is bug number 0x3BA04C28, replace it with VK_PRESENT_MODE_MAILBOX_KHR
+     */
+    std::ranges::for_each(details.present_modes, [](auto& x) {
+        if (x == 0x3BA04C28) {
+            x = VK_PRESENT_MODE_MAILBOX_KHR;
+            std::println("wrong present mode '0x3BA04C28' occurred");
+        }
+    });
     return details;
 }
 
 VkPresentModeKHR choose_swap_present_mode(const std::vector<VkPresentModeKHR>& available_present_modes) {
-    for (const auto& available_present_mode : available_present_modes) {
-        if (available_present_mode == VK_PRESENT_MODE_MAILBOX_KHR) {
-            return available_present_mode;
-        }
-    }
+
+    if (std::ranges::find(available_present_modes, VK_PRESENT_MODE_MAILBOX_KHR) != available_present_modes.end())
+        return VK_PRESENT_MODE_MAILBOX_KHR;
 
     return VK_PRESENT_MODE_FIFO_KHR;
 }

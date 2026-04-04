@@ -55,7 +55,7 @@ struct device_creation_info {
 struct swap_chain_support_details {
     VkSurfaceCapabilitiesKHR capabilities;
     std::vector<VkSurfaceFormatKHR> formats;
-    std::vector<VkPresentModeKHR> presentModes;
+    std::vector<VkPresentModeKHR> present_modes;
 };
 
 VkPhysicalDevice pick_suitable_device(const VkInstance& instance, VkSurfaceKHR surface);
@@ -82,7 +82,7 @@ constexpr uint32_t WIDTH = 1080;
 constexpr uint32_t HEIGHT = 960;
 
 
-struct vulkan_core {
+struct vulkan_core: enabled_destruct_stack<vulkan_core>{
     VkInstance instance = {};
     VkDevice device = {};
     VkPhysicalDevice physical_device = VK_NULL_HANDLE;
@@ -166,6 +166,13 @@ struct vulkan_core {
             print_stacktrace_and_terminate();
         }
 
+        register_cleanup([this] {
+
+            if (instance != VK_NULL_HANDLE) {
+                vkDestroyInstance(this->instance, nullptr);
+            }
+        });
+
         std::cout << "Vulkan实例创建成功" << std::endl;
     }
 
@@ -201,6 +208,12 @@ struct vulkan_core {
         this->present_queue = logical_device_instance.present_queue;
         this->graphics_family_index = logical_device_instance.graphics_family_index;
         this->present_family_index = logical_device_instance.present_family_index;
+
+        register_cleanup([this] {
+            if (device != VK_NULL_HANDLE) {
+            vkDestroyDevice(this->device, nullptr);
+            }
+        });
     }
 
 
@@ -212,6 +225,12 @@ struct vulkan_core {
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
         window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
+
+        register_cleanup([this] {
+            if (window) {
+                glfwDestroyWindow(window);
+            }
+        });
     }
 
     VkSurfaceKHR surface = {};
@@ -221,33 +240,42 @@ struct vulkan_core {
             std::println("无法创建窗口表面");
             print_stacktrace_and_terminate();
         }
+
+        register_cleanup([this] {
+            if (surface != VK_NULL_HANDLE) {
+                vkDestroySurfaceKHR(instance, surface, nullptr);
+            }
+        });
     }
 
     VkSwapchainKHR swap_chain = {};
     std::vector<VkImage> swap_chain_images;
     VkFormat swap_chain_image_format = {};
     VkExtent2D swap_chain_extent = {};
-
+    dtor_type* swap_chain_cleanup = nullptr;
     void create_swap_chain() {
-        const swap_chain_support_details swap_chain_support = query_swap_chain_support(this->physical_device, this->surface);
+        if (swap_chain_cleanup)
+            (*swap_chain_cleanup)();
+
+        const auto [capabilities, formats, present_modes] = query_swap_chain_support(this->physical_device, this->surface);
 
         // 添加检查：
-        if (swap_chain_support.formats.empty() || swap_chain_support.presentModes.empty()) {
+        if (formats.empty() || present_modes.empty()) {
             std::println("Swap chain not adequately supported");
             print_stacktrace_and_terminate();
         }
 
-        const VkSurfaceFormatKHR surface_format = choose_swap_surface_format(swap_chain_support.formats);
-        const VkPresentModeKHR present_mode = choose_swap_present_mode(swap_chain_support.presentModes);
-        const VkExtent2D extent = choose_swap_extent(swap_chain_support.capabilities, this->window);
+        const VkSurfaceFormatKHR surface_format = choose_swap_surface_format(formats);
+        const VkPresentModeKHR present_mode = choose_swap_present_mode(present_modes);
+        const VkExtent2D extent = choose_swap_extent(capabilities, this->window);
 
-        uint32_t image_count = swap_chain_support.capabilities.minImageCount + 1;
+        uint32_t image_count = capabilities.minImageCount + 1;
 
-        if (swap_chain_support.capabilities.maxImageCount > 0 && image_count > swap_chain_support.capabilities.maxImageCount) {
-            image_count = swap_chain_support.capabilities.maxImageCount;
+        if (capabilities.maxImageCount > 0 && image_count > capabilities.maxImageCount) {
+            image_count = capabilities.maxImageCount;
         }
 
-        image_count = std::max(image_count, swap_chain_support.capabilities.minImageCount);
+        image_count = std::max(image_count, capabilities.minImageCount);
 
         VkSwapchainCreateInfoKHR create_info{};
         create_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
@@ -273,7 +301,7 @@ struct vulkan_core {
             create_info.pQueueFamilyIndices = nullptr; // Optional
         }
 
-        create_info.preTransform = swap_chain_support.capabilities.currentTransform;
+        create_info.preTransform = capabilities.currentTransform;
         create_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
         create_info.presentMode = present_mode;
         create_info.clipped = VK_TRUE;
@@ -291,11 +319,23 @@ struct vulkan_core {
 
         this->swap_chain_image_format = surface_format.format;
         this->swap_chain_extent = extent;
+
+        if (!swap_chain_cleanup) {
+            register_cleanup([this] {
+                if (swap_chain != VK_NULL_HANDLE) {
+                    vkDestroySwapchainKHR(device, swap_chain, nullptr);
+                }
+            });
+            swap_chain_cleanup = &dtor_stack.top();
+        }
     }
 
     std::vector<VkImageView> swap_chain_image_views;
-
+    dtor_type* image_view_cleanup = nullptr;
     void create_image_views() {
+        if (image_view_cleanup)
+            (*image_view_cleanup)();
+
         this->swap_chain_image_views.resize(this->swap_chain_images.size());
         for (size_t i = 0; i < this->swap_chain_images.size(); i++) {
             VkImageViewCreateInfo createInfo = {};
@@ -317,6 +357,15 @@ struct vulkan_core {
                 print_stacktrace_and_terminate();
             }
         }
+
+        if (!image_view_cleanup) {
+            register_cleanup([this] {
+                for (const auto& image_view : swap_chain_image_views) {
+                    vkDestroyImageView(device, image_view, nullptr);
+                }
+            });
+            image_view_cleanup = &dtor_stack.top();
+        }
     }
 
     VkRenderPass renderpass = {};
@@ -328,25 +377,25 @@ struct vulkan_core {
     std::vector<VkImageView> depth_image_views = {};
 
     // 简化的深度图像创建函数
-    void create_depth_image(VkImage& image, VkDeviceMemory& imageMemory, VkImageView& imageView) const {
+    void create_depth_image(VkImage& image, VkDeviceMemory& imageMemory, VkImageView& image_view) const {
         // 使用类内的交换链尺寸
         const VkExtent2D& extent = this->swap_chain_extent;  // 假设这是类成员
 
         // 1. 创建图像
-        VkImageCreateInfo imageInfo{};
-        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        imageInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageInfo.extent = { extent.width, extent.height, 1 };
-        imageInfo.mipLevels = 1;
-        imageInfo.arrayLayers = 1;
-        imageInfo.format = this->depth_format;
-        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-        imageInfo.samples = this->msaa_samples;
-        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        VkImageCreateInfo image_info{};
+        image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        image_info.imageType = VK_IMAGE_TYPE_2D;
+        image_info.extent = { extent.width, extent.height, 1 };
+        image_info.mipLevels = 1;
+        image_info.arrayLayers = 1;
+        image_info.format = this->depth_format;
+        image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+        image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        image_info.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        image_info.samples = this->msaa_samples;
+        image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        if (vkCreateImage(device, &imageInfo, nullptr, &image) != VK_SUCCESS) {
+        if (vkCreateImage(device, &image_info, nullptr, &image) != VK_SUCCESS) {
             vkDestroyImage(device, image, nullptr);
             std::println("failed to create depth image!");
             print_stacktrace_and_terminate();
@@ -370,24 +419,29 @@ struct vulkan_core {
         vkBindImageMemory(device, image, imageMemory, 0);
 
         // 3. 创建图像视图
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = image;
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = this->depth_format;
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
+        VkImageViewCreateInfo view_info{};
+        view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_info.image = image;
+        view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_info.format = this->depth_format;
+        view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        view_info.subresourceRange.baseMipLevel = 0;
+        view_info.subresourceRange.levelCount = 1;
+        view_info.subresourceRange.baseArrayLayer = 0;
+        view_info.subresourceRange.layerCount = 1;
 
-        if (vkCreateImageView(device, &viewInfo, nullptr, &imageView) != VK_SUCCESS) {
+        if (vkCreateImageView(device, &view_info, nullptr, &image_view) != VK_SUCCESS) {
             std::println("failed to create depth image view!");
             print_stacktrace_and_terminate();
         }
     }
 
+    dtor_type* depth_resource_cleanup = nullptr;
     void create_depth_resources() {
+
+        if (depth_resource_cleanup)
+            (*depth_resource_cleanup)();
+
         depth_format = find_depth_format(this->physical_device);
 
         // 先测试深度格式是否有效
@@ -404,10 +458,29 @@ struct vulkan_core {
             // 直接调用 create_depth_image，但确保参数正确
             create_depth_image(depth_images[i], depth_image_memories[i], depth_image_views[i]);
         }
+
+
+        if (!depth_resource_cleanup) {
+            register_cleanup([this] {
+                for (const auto& view: depth_image_views) {
+                    vkDestroyImageView(device, view, nullptr);
+                }
+                for (const auto& image : depth_images) {
+                    vkDestroyImage(device, image, nullptr);
+                }
+                for (const auto& memory : depth_image_memories) {
+                    vkFreeMemory(device, memory, nullptr);
+                }
+            });
+            depth_resource_cleanup = &dtor_stack.top();
+        }
     }
 
 
+    dtor_type* renderpass_cleanup = nullptr;
     void create_renderpass() {
+        if (renderpass_cleanup)
+            (*renderpass_cleanup)();
         // 1. 颜色附件（现在是MSAA的）
         VkAttachmentDescription color_attachment = {};
         color_attachment.format = swap_chain_image_format;
@@ -517,11 +590,23 @@ struct vulkan_core {
             std::println("无法创建渲染通道!");
             print_stacktrace_and_terminate();
         }
+
+
+        if (!renderpass_cleanup) {
+            register_cleanup([this] {
+                vkDestroyRenderPass(device, renderpass, nullptr);
+            });
+            renderpass_cleanup = &dtor_stack.top();
+        }
     }
 
     std::vector<VkFramebuffer> swap_chain_framebuffers;
-
+    dtor_type* framebuffer_cleanup = nullptr;
     void create_framebuffers() {
+
+        if (framebuffer_cleanup)
+            (*framebuffer_cleanup)();
+
         swap_chain_framebuffers.resize(swap_chain_image_views.size());
 
         for (size_t i = 0; i < swap_chain_image_views.size(); i++) {
@@ -555,6 +640,16 @@ struct vulkan_core {
                 print_stacktrace_and_terminate();
             }
         }
+
+
+        if (!framebuffer_cleanup) {
+            register_cleanup([this] {
+                for (const auto& frame_buffer : swap_chain_framebuffers) {
+                    vkDestroyFramebuffer(device, frame_buffer, nullptr);
+                }
+            });
+            framebuffer_cleanup = &dtor_stack.top();
+        }
     }
 
     VkCommandPool command_pool = {};
@@ -570,11 +665,19 @@ struct vulkan_core {
             std::println("failed to create command pool!");
             print_stacktrace_and_terminate();
         }
+
+        register_cleanup([this] {
+            if (command_pool != VK_NULL_HANDLE) {
+                vkDestroyCommandPool(device, command_pool, nullptr);
+            }
+        });
     }
 
     VkPipelineLayout pipeline_layout = {};
-
+    dtor_type* pipeline_cleanup_cleanup = nullptr;
     void create_graphics_pipeline_layout() {
+        if (pipeline_cleanup_cleanup)
+            (*pipeline_cleanup_cleanup)();
 
         // 3. 顶点输入状态（使用新的Vertex结构）
         auto binding_description = vertex::get_binding_descriptions();
@@ -669,6 +772,16 @@ struct vulkan_core {
             std::println("failed to create pipeline layout!");
             print_stacktrace_and_terminate();
         }
+
+
+        if (!pipeline_cleanup_cleanup) {
+            register_cleanup([this] {
+                if (pipeline_layout != VK_NULL_HANDLE) {
+                    vkDestroyPipelineLayout(device, pipeline_layout, nullptr);
+                }
+            });
+            pipeline_cleanup_cleanup = &dtor_stack.top();
+        }
     }
 
     VkDescriptorSetLayout descriptor_set_layout = VK_NULL_HANDLE;
@@ -700,6 +813,69 @@ struct vulkan_core {
             std::println("无法创建描述符集布局!");
             print_stacktrace_and_terminate();
         }
+
+        register_cleanup([this] {
+            if (descriptor_set_layout != VK_NULL_HANDLE) {
+                vkDestroyDescriptorSetLayout(device, descriptor_set_layout, nullptr);
+            }
+        });
+    }
+
+    VkDescriptorSetLayout descriptor_set_layout_pbr = VK_NULL_HANDLE;
+
+    void create_pbr_descriptor_set_layout() {
+        std::array<VkDescriptorSetLayoutBinding, 6> bindings = {};  // 增加到6个
+
+        // binding 0: Uniform Buffer
+        bindings[0].binding = 0;
+        bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        bindings[0].descriptorCount = 1;
+        bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        // binding 1: Base Color
+        bindings[1].binding = 1;
+        bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[1].descriptorCount = 1;
+        bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        // binding 2: Metallic/Roughness
+        bindings[2].binding = 2;
+        bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[2].descriptorCount = 1;
+        bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        // binding 3: Normal
+        bindings[3].binding = 3;
+        bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[3].descriptorCount = 1;
+        bindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        // binding 4: Occlusion
+        bindings[4].binding = 4;
+        bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[4].descriptorCount = 1;
+        bindings[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        // binding 5: Emissive
+        bindings[5].binding = 5;
+        bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[5].descriptorCount = 1;
+        bindings[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        // 创建描述符集布局
+        VkDescriptorSetLayoutCreateInfo layout_info{};
+        layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layout_info.bindingCount = bindings.size();
+        layout_info.pBindings = bindings.data();
+
+        if (vkCreateDescriptorSetLayout(device, &layout_info, nullptr, &descriptor_set_layout_pbr) != VK_SUCCESS) {
+            std::println(stderr, "PBR描述符集布局创建失败");
+            print_stacktrace_and_terminate();
+        }
+
+        register_cleanup([this] {
+            vkDestroyDescriptorSetLayout(device, descriptor_set_layout_pbr, nullptr);
+        });
     }
 
     VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
@@ -725,6 +901,12 @@ struct vulkan_core {
             std::println("failed in creating descriptor pool");
             print_stacktrace_and_terminate();
         }
+
+        register_cleanup([this] {
+            if (descriptor_pool != VK_NULL_HANDLE) {
+                vkDestroyDescriptorPool(device, descriptor_pool, nullptr);
+            }
+        });
     }
 
     void create_command_buffers() {
@@ -787,136 +969,23 @@ struct vulkan_core {
                     print_stacktrace_and_terminate();
                 }
         }
-    }
 
-    void cleanup() const noexcept {
-        // 清理命令池和命令缓冲区
-        if (!command_buffers.empty()) {
-            vkFreeCommandBuffers(this->device, this->command_pool,
-                               static_cast<uint32_t>(command_buffers.size()), command_buffers.data());
-        }
-        if (command_pool != VK_NULL_HANDLE) {
-            vkDestroyCommandPool(this->device, this->command_pool, nullptr);
-        }
+        register_cleanup([this] {
+            for (const auto& semaphore : image_available_semaphores) {
+                vkDestroySemaphore(device, semaphore, nullptr);
+            }
 
-        // 清理帧缓冲区
-        for (const auto& framebuffer : swap_chain_framebuffers) {
-            vkDestroyFramebuffer(this->device, framebuffer, nullptr);
-        }
+            for (const auto& semaphore : render_finished_semaphores) {
+                vkDestroySemaphore(device, semaphore, nullptr);
+            }
 
-        // 清理同步对象
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            vkDestroySemaphore(this->device, image_available_semaphores[i], nullptr);
-            vkDestroySemaphore(this->device, render_finished_semaphores[i], nullptr);
-            vkDestroyFence(this->device, in_flight_fences[i], nullptr);
-        }
-
-        // 清理MSAA颜色资源
-        for (size_t i = 0; i < color_image_views.size(); i++) {
-            vkDestroyImageView(this->device, color_image_views[i], nullptr);
-            vkDestroyImage(this->device, color_images[i], nullptr);
-            vkFreeMemory(this->device, color_image_memories[i], nullptr);
-        }
-
-        // 清理深度资源
-        for (size_t i = 0; i < depth_image_views.size(); i++) {
-            vkDestroyImageView(this->device, depth_image_views[i], nullptr);
-            vkDestroyImage(this->device, depth_images[i], nullptr);
-            vkFreeMemory(this->device, depth_image_memories[i], nullptr);
-        }
-
-        // 清理交换链资源
-        for (const auto& image_view : this->swap_chain_image_views) {
-            vkDestroyImageView(this->device, image_view, nullptr);
-        }
-
-        if (swap_chain != VK_NULL_HANDLE) {
-            vkDestroySwapchainKHR(this->device, this->swap_chain, nullptr);
-        }
-
-        if (device != VK_NULL_HANDLE) {
-            vkDestroyDevice(this->device, nullptr);
-        }
-
-        if (surface != VK_NULL_HANDLE) {
-            vkDestroySurfaceKHR(this->instance, this->surface, nullptr);
-        }
-
-        if (instance != VK_NULL_HANDLE) {
-            vkDestroyInstance(this->instance, nullptr);
-        }
-
-        if (window != nullptr) {
-            glfwDestroyWindow(this->window);
-        }
-
-        glfwTerminate();
+            for (const auto& fence : in_flight_fences) {
+                vkDestroyFence(device, fence, nullptr);
+            }
+        });
     }
 
     bool framebuffer_resized = false;
-
-    /*
-    void record_command_buffer(const VkCommandBuffer& command_buffer, const uint32_t image_index) const {
-        throw std::runtime_error("vulkan_core::record_command_buffer should not be called directly!");
-        // 开始记录命令缓冲区
-        VkCommandBufferBeginInfo begin_info{};
-        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        begin_info.flags = 0;  // 可选
-        begin_info.pInheritanceInfo = nullptr;  // 可选
-
-        if (vkBeginCommandBuffer(command_buffer, &begin_info) != VK_SUCCESS) {
-            throw std::runtime_error("无法开始记录命令缓冲区!");
-        }
-
-        // ✅ 正确设置清除值：颜色和深度
-        std::array<VkClearValue, 2> clear_values{};
-        clear_values[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-        clear_values[1].depthStencil = {1.0f, 0};
-
-        // 开始渲染通道
-        VkRenderPassBeginInfo render_pass_info{};
-        render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        render_pass_info.renderPass = renderpass;
-        render_pass_info.framebuffer = swap_chain_framebuffers[image_index];
-        render_pass_info.renderArea.offset = {0, 0};
-        render_pass_info.renderArea.extent = swap_chain_extent;
-
-        // ✅ 正确设置清除值 - 一次性完成
-        render_pass_info.clearValueCount = static_cast<uint32_t>(clear_values.size());
-        render_pass_info.pClearValues = clear_values.data();
-
-        vkCmdBeginRenderPass(command_buffer, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
-
-        // 绑定图形管线
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline);
-
-        // 设置动态视口
-        VkViewport viewport{};
-        viewport.x = 0.0f;
-        viewport.y = 0.0f;
-        viewport.width = static_cast<float>(swap_chain_extent.width);
-        viewport.height = static_cast<float>(swap_chain_extent.height);
-        viewport.minDepth = 0.0f;
-        viewport.maxDepth = 1.0f;
-        vkCmdSetViewport(command_buffer, 0, 1, &viewport);
-
-        // 设置动态裁剪
-        VkRect2D scissor{};
-        scissor.offset = {0, 0};
-        scissor.extent = swap_chain_extent;
-        vkCmdSetScissor(command_buffer, 0, 1, &scissor);
-
-        // 绘制命令（这里绘制一个三角形）
-        vkCmdDraw(command_buffer, 3, 1, 0, 0);
-
-        // 结束渲染通道
-        vkCmdEndRenderPass(command_buffer);
-
-        // 结束记录命令缓冲区
-        if (vkEndCommandBuffer(command_buffer) != VK_SUCCESS) {
-            throw std::runtime_error("无法结束记录命令缓冲区!");
-        }
-    }*/
 
     void cleanup_swap_chain() {
         // 清理帧缓冲区
@@ -944,8 +1013,6 @@ struct vulkan_core {
         depth_image_views.clear();
         depth_images.clear();
         depth_image_memories.clear();
-
-        // ... 其余清理代码 ...
     }
 
     void recreate_swap_chain() {
@@ -1019,7 +1086,12 @@ struct vulkan_core {
         vkBindImageMemory(device, image, imageMemory, 0);
     }
 
+    dtor_type* color_resources_cleanup = nullptr;
+
     void create_color_resources() {
+        if (color_resources_cleanup)
+            (*color_resources_cleanup)();
+
         color_images.resize(swap_chain_image_views.size());
         color_image_memories.resize(swap_chain_image_views.size());
         color_image_views.resize(swap_chain_image_views.size());
@@ -1043,6 +1115,21 @@ struct vulkan_core {
                 VK_IMAGE_ASPECT_COLOR_BIT,
                 device
             );
+        }
+
+        if (!color_resources_cleanup) {
+            register_cleanup([this] {
+                for (const auto& view : color_image_views) {
+                    vkDestroyImageView(device, view, nullptr);
+                }
+                for (const auto& image : color_images) {
+                    vkDestroyImage(device, image, nullptr);
+                }
+                for (const auto& memory : color_image_memories) {
+                    vkFreeMemory(device, memory, nullptr);
+                }
+            });
+            color_resources_cleanup = &dtor_stack.top();
         }
     }
 
@@ -1113,9 +1200,7 @@ struct vulkan_core {
             std::println("Vulkan初始化成功!");
     }
 
-    ~vulkan_core() {
-        this->cleanup();
-    }
+    ~vulkan_core() = default;
 
     static void framebuffer_resize_callback(GLFWwindow* window, int width, int height) {
         const auto app = static_cast<vulkan_core*>(glfwGetWindowUserPointer(window));
