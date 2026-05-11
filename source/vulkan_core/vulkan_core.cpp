@@ -7,6 +7,8 @@
 #include <algorithm>
 #include "vulkan_core.h"
 
+using namespace vulkan_core;
+
 bool check_validation_layer_support(const std::vector<const char*>& validation_layers) {
     uint32_t layer_count;
     vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
@@ -301,8 +303,8 @@ swap_chain_support_details query_swap_chain_support(const VkPhysicalDevice& devi
 
     std::print("present modes count: {} \n", details.present_modes.size());
 
-    /*
-     * @hack: if is bug number 0x3BA04C28, replace it with VK_PRESENT_MODE_MAILBOX_KHR
+    /**
+     * @note a hack while vulkan returned '0x3BA04C28', replace it with VK_PRESENT_MODE_MAILBOX_KHR
      */
     std::ranges::for_each(details.present_modes, [](auto& x) {
         if (x == 0x3BA04C28) {
