@@ -84,7 +84,7 @@ namespace vulkan_core {
     constexpr uint32_t HEIGHT = 960;
 
 
-    struct core: enabled_destruct_stack<core>{
+    struct core: enable_destruct_stack<core>{
         VkInstance instance = {};
         VkDevice device = {};
         VkPhysicalDevice physical_device = VK_NULL_HANDLE;

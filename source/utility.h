@@ -7,29 +7,30 @@
 
 #include <functional>
 #include <stack>
+#include <source_location>
 
-[[noreturn]] void print_stacktrace_and_terminate();
+[[noreturn]] void print_stacktrace_and_terminate(const std::source_location &location = std::source_location::current());
 
 
 using dtor_signature = void();
 
 template <typename derived, template<typename> typename dtor_container = std::function>
-class enabled_destruct_stack {
+class enable_destruct_stack {
 public:
     // 禁用拷贝
-    enabled_destruct_stack(const enabled_destruct_stack&) = delete;
-    enabled_destruct_stack& operator=(const enabled_destruct_stack&) = delete;
+    enable_destruct_stack(const enable_destruct_stack&) = delete;
+    enable_destruct_stack& operator=(const enable_destruct_stack&) = delete;
 protected:
     using dtor_type = dtor_container<dtor_signature>;
-    enabled_destruct_stack() = default;
+    enable_destruct_stack() = default;
 
     // 正确的移动构造
-    enabled_destruct_stack(enabled_destruct_stack&& other) noexcept
+    enable_destruct_stack(enable_destruct_stack&& other) noexcept
         : dtor_stack(std::move(other.dtor_stack)) {
     }
 
     // 移动赋值
-    enabled_destruct_stack& operator=(enabled_destruct_stack&& other) noexcept {
+    enable_destruct_stack& operator=(enable_destruct_stack&& other) noexcept {
         if (this != &other) {
             do_cleanup();  // 清理当前资源
             dtor_stack = std::move(other.dtor_stack);
@@ -37,7 +38,7 @@ protected:
         return *this;
     }
 
-    ~enabled_destruct_stack() noexcept {
+    ~enable_destruct_stack() noexcept {
         do_cleanup();
     }
 

@@ -108,7 +108,6 @@ std::pair<std::vector<vertex>, std::vector<uint32_t>>
 get_gltf_module_from_file(std::string_view path);
 
 #include <vector>
-#include <stdexcept>
 
 // 通用顶点缓冲区创建器
 class vertex_buffer_creator {
