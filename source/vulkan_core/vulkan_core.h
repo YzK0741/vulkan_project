@@ -17,6 +17,14 @@
 #include <vector>
 
 #include "vulkan_utility.h"
+#include "vma/vma.h"
+
+VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
+        VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
+        VkDebugUtilsMessageTypeFlagsEXT message_type,
+        const VkDebugUtilsMessengerCallbackDataEXT* callback_data,
+        void* user_data
+    );
 
 namespace vulkan_core {
 
@@ -43,6 +51,7 @@ namespace vulkan_core {
         uint32_t present_family_index = 0;
         VkQueue graphics_queue = VK_NULL_HANDLE;
         VkQueue present_queue = VK_NULL_HANDLE;
+        uint32_t queue_family_index = 0;
         // 可以添加更多队列：compute_queue, transfer_queue等
     };
 
@@ -80,6 +89,7 @@ namespace vulkan_core {
     VkImageView create_image_view(const VkImage& image, const VkFormat& format, const VkImageAspectFlags& aspectFlags, const VkDevice& device);
     VkSampleCountFlagBits get_max_usable_sample_count(const VkPhysicalDevice& physical_device);
 
+
     constexpr uint32_t WIDTH = 1080;
     constexpr uint32_t HEIGHT = 960;
 
@@ -90,6 +100,9 @@ namespace vulkan_core {
         VkPhysicalDevice physical_device = VK_NULL_HANDLE;
         uint32_t graphics_family_index = 0;
         uint32_t present_family_index = 0;
+#ifdef _DEBUG
+        VkDebugUtilsMessengerEXT debug_messenger = VK_NULL_HANDLE;
+#endif
 
         void init_instance() {
             VkApplicationInfo app_info {};
@@ -176,10 +189,51 @@ namespace vulkan_core {
             });
 
             std::cout << "Vulkan实例创建成功" << std::endl;
+
+#ifdef _DEBUG
+            // 获取函数指针
+            auto vkCreateDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(
+                instance, "vkCreateDebugUtilsMessengerEXT"));
+            auto vkDestroyDebugUtilsMessengerEXT = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(vkGetInstanceProcAddr(
+                instance, "vkDestroyDebugUtilsMessengerEXT"));
+
+            // 检查函数指针是否获取成功
+            if (!vkCreateDebugUtilsMessengerEXT || !vkDestroyDebugUtilsMessengerEXT) {
+                std::cerr << "Failed to get debug utils function pointers" << std::endl;
+                print_stacktrace_and_terminate();
+            }
+            VkDebugUtilsMessengerCreateInfoEXT debug_info{};
+            debug_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+            debug_info.messageSeverity =
+                VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+                    VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
+                        VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                            VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+            debug_info.messageType =
+                VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+                    VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+            debug_info.pfnUserCallback = debug_callback;  // 需要实现这个回调函数
+            debug_info.pUserData = nullptr;
+
+            if (vkCreateDebugUtilsMessengerEXT(instance, &debug_info, nullptr, &debug_messenger) != VK_SUCCESS) {
+                std::cerr << "创建调试信使失败" << std::endl;
+            } else {
+                std::cout << "调试信使创建成功" << std::endl;
+                // 记得在 cleanup 中销毁
+                register_cleanup([this, vkDestroyDebugUtilsMessengerEXT] {
+                    if (debug_messenger != VK_NULL_HANDLE) {
+                        vkDestroyDebugUtilsMessengerEXT(instance, debug_messenger, nullptr);
+                    }
+                });
+            }
+
+#endif
         }
 
         VkQueue graphics_queue = VK_NULL_HANDLE;
         VkQueue present_queue = VK_NULL_HANDLE;
+        uint32_t graphics_queue_family = VK_QUEUE_FAMILY_IGNORED;
 
         void init_device_and_queue() {
             // 创建设备
@@ -232,6 +286,16 @@ namespace vulkan_core {
                 if (window) {
                     glfwDestroyWindow(window);
                 }
+            });
+        }
+
+        VMA vma;
+
+        void init_vma() noexcept {
+            this->vma.init(this->instance, this->device, this->physical_device, this->graphics_queue, this->graphics_family_index);
+
+            register_cleanup([this] {
+               vma.destroy();
             });
         }
 
@@ -1137,68 +1201,71 @@ namespace vulkan_core {
         }
 
         core() {
-            std::cout << "开始Vulkan初始化..." << std::endl;
+            std::println("开始Vulkan初始化...");
 
             this->init_window();
-            std::cout << "窗口初始化完成" << std::endl;
+            std::println("窗口初始化完成");
 
             this->init_instance();
-            std::cout << "Vulkan实例创建完成" << std::endl;
+            std::println("Vulkan实例创建完成");
 
             this->init_surface();
-            std::cout << "表面创建完成" << std::endl;
+            std::println("表面创建完成");
 
             this->physical_device = pick_suitable_device(this->instance, this->surface);
-            std::cout << "物理设备选择完成" << std::endl;
+            std::println("物理设备选择完成");
 
             this->init_device_and_queue();
-            std::cout << "逻辑设备和队列创建完成" << std::endl;
+            std::println("逻辑设备和队列创建完成");
+
+            this->init_vma();
+            std::println("vma 创建完成");
 
             this->create_swap_chain();
-            std::cout << "交换链创建完成" << std::endl;
+            std::println("交换链创建完成");
 
             this->create_image_views();
-            std::cout << "图像视图创建完成" << std::endl;
+            std::println("图像视图创建完成");
 
             // 在创建深度格式之后，检查MSAA支持
             depth_format = find_depth_format(this->physical_device);
 
             // 获取最大可用的采样数
             msaa_samples = get_max_usable_sample_count(this->physical_device);
-            std::cout << "使用MSAA采样数: " << msaa_samples << std::endl;
+            std::println("使用MSAA采样数: {}", static_cast<long>(this->msaa_samples));
 
             this->create_depth_resources();
-            std::cout << "深度资源创建完成" << std::endl;
+            std::println("深度资源创建完成");
 
             // 创建MSAA颜色资源（如果有MSAA）
             if (msaa_samples > VK_SAMPLE_COUNT_1_BIT) {
                 color_format = swap_chain_image_format;  // 使用交换链的格式
                 create_color_resources();
-                std::cout << "MSAA颜色资源创建完成" << std::endl;
+                std::println("MSAA颜色资源创建完成");
             }
 
             this->create_descriptor_set_layout();
-            std::cout << "描述符集布局创建完成" << std::endl;
+            std::println("描述符集布局创建完成");
 
             this->create_descriptor_pool();
-            std::cout << "描述符池创建完成" << std::endl;
+            std::println("描述符池创建完成");
 
             this->create_renderpass();
-            std::cout << "渲染通道创建完成" << std::endl;
+            std::println("渲染通道创建完成");
 
             this->create_framebuffers();
-            std::cout << "帧缓冲区创建完成" << std::endl;
+            std::println("帧缓冲区创建完成");
 
             this->create_graphics_pipeline_layout();
 
             this->create_command_pool();
-            std::cout << "命令池创建完成" << std::endl;
+            std::println("命令池创建完成");
 
             this->create_command_buffers();
-            std::cout << "命令缓冲区创建完成" << std::endl;
+            std::println("命令缓冲区创建完成");
 
             this->create_sync_objects();
-            std::cout << "同步对象创建完成" << std::endl;
+            std::println("同步对象创建完成");
 
             std::println("Vulkan初始化成功!");
         }

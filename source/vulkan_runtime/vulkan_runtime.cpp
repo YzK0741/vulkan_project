@@ -14,6 +14,18 @@ namespace vulkan_runtime {
         create_pipeline_layout();
     }
 
+    runtime::~runtime() {
+        // 清理管线
+        if (graphics_pipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(core.device, graphics_pipeline, nullptr);
+        }
+        if (pipeline_layout != VK_NULL_HANDLE) {
+            vkDestroyPipelineLayout(core.device, pipeline_layout, nullptr);
+        }
+
+        cleanup_texture_resources();
+    }
+
     void runtime::create_uniform_buffers() {
         uniform_buffers.resize(core.swap_chain_images.size());
         uniform_buffers_memory.resize(core.swap_chain_images.size());
@@ -74,7 +86,7 @@ namespace vulkan_runtime {
         }
     }
 
-    VkPipeline runtime::create_pipeline()  {
+    VkPipeline runtime::create_pipeline() {
             // 1. 验证核心对象
             if (core.device == VK_NULL_HANDLE) {
                 std::println("Vulkan device is not initialized");
@@ -258,25 +270,10 @@ namespace vulkan_runtime {
             vulkan_texture texture;
             if (texture_data.empty()) {
                 const stb_texture stb_texture1 = create_default_texture();
-                create_texture_from_stb(stb_texture1);
-                texture.texture_image = texture_image;
-                texture.texture_image_memory = texture_image_memory;
-                texture.texture_image_view = texture_image_view;
-                texture.texture_sampler = texture_sampler;
-                texture_image = VK_NULL_HANDLE;
-                texture_image_memory = VK_NULL_HANDLE;
-                texture_image_view = VK_NULL_HANDLE;
-                texture_sampler = VK_NULL_HANDLE;
+
+                texture = this->create_texture(stb_texture1);
             } else {
-                create_vulkan_texture(texture_data, width, height, format);
-                texture.texture_image = texture_image;
-                texture.texture_image_memory = texture_image_memory;
-                texture.texture_image_view = texture_image_view;
-                texture.texture_sampler = texture_sampler;
-                texture_image = VK_NULL_HANDLE;
-                texture_image_memory = VK_NULL_HANDLE;
-                texture_image_view = VK_NULL_HANDLE;
-                texture_sampler = VK_NULL_HANDLE;
+                texture = create_texture(texture_data, width, height, format);
             }
 
             create_uniform_buffers();
@@ -306,6 +303,9 @@ namespace vulkan_runtime {
             vulkan_texture texture;
             if (path.empty()) {
                 const stb_texture stb_texture1 = create_default_texture();
+
+                texture = this->create_texture(stb_texture1);
+                /*
                 create_texture_from_stb(stb_texture1);
                 texture.texture_image = texture_image;
                 texture.texture_image_memory = texture_image_memory;
@@ -315,6 +315,7 @@ namespace vulkan_runtime {
                 texture_image_memory = VK_NULL_HANDLE;
                 texture_image_view = VK_NULL_HANDLE;
                 texture_sampler = VK_NULL_HANDLE;
+                */
                 std::cout << "纹理资源创建成功，尺寸: " << stb_texture1.width << "x" << stb_texture1.height << std::endl;
             } else {
                 load_png_texture(path.data());
@@ -529,7 +530,7 @@ namespace vulkan_runtime {
 
             // 1. Uniform Buffer描述符
             VkDescriptorBufferInfo buffer_info{};
-            buffer_info.buffer = uniform_buffer;  // 使用第一个uniform buffer
+            buffer_info.buffer = uniform_buffer;
             buffer_info.offset = 0;
             buffer_info.range = sizeof(uniform_buffer_object);
 
@@ -603,4 +604,359 @@ namespace vulkan_runtime {
             texture_image = VK_NULL_HANDLE;
         }
     }
+
+    VkCommandBuffer runtime::begin_single_time_commands(VkDevice device, VkCommandPool command_pool) {
+        VkCommandBufferAllocateInfo alloc_info{};
+        alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        alloc_info.commandPool = command_pool;
+        alloc_info.commandBufferCount = 1;
+
+        VkCommandBuffer command_buffer;
+        vkAllocateCommandBuffers(device, &alloc_info, &command_buffer);
+
+        VkCommandBufferBeginInfo begin_info{};
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        vkBeginCommandBuffer(command_buffer, &begin_info);
+
+        return command_buffer;
+    }
+
+    void runtime::end_single_time_commands(VkDevice device, VkCommandPool command_pool, VkQueue graphics_queue, VkCommandBuffer command_buffer) {
+        vkEndCommandBuffer(command_buffer);
+
+        VkSubmitInfo submit_info{};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.commandBufferCount = 1;
+        submit_info.pCommandBuffers = &command_buffer;
+
+        vkQueueSubmit(graphics_queue, 1, &submit_info, VK_NULL_HANDLE);
+        vkQueueWaitIdle(graphics_queue);
+
+        vkFreeCommandBuffers(device, command_pool, 1, &command_buffer);
+    }
+
+    VkImageView runtime::create_image_view(VkDevice device, VkImage image, VkFormat format, VkImageAspectFlags aspect_flags) {
+        VkImageViewCreateInfo view_info{};
+        view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_info.image = image;
+        view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_info.format = format;
+        view_info.subresourceRange.aspectMask = aspect_flags;
+        view_info.subresourceRange.baseMipLevel = 0;
+        view_info.subresourceRange.levelCount = 1;
+        view_info.subresourceRange.baseArrayLayer = 0;
+        view_info.subresourceRange.layerCount = 1;
+
+        VkImageView image_view;
+        if (vkCreateImageView(device, &view_info, nullptr, &image_view) != VK_SUCCESS) {
+            std::println("无法创建纹理图像视图!");
+            print_stacktrace_and_terminate();
+        }
+
+        return image_view;
+    }
+
+    void runtime::create_texture_sampler() {
+        VkSamplerCreateInfo sampler_info{};
+        sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        sampler_info.magFilter = VK_FILTER_LINEAR;
+        sampler_info.minFilter = VK_FILTER_LINEAR;
+        sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_info.anisotropyEnable = VK_TRUE;
+        sampler_info.maxAnisotropy = 16;
+        sampler_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        sampler_info.unnormalizedCoordinates = VK_FALSE;
+        sampler_info.compareEnable = VK_FALSE;
+        sampler_info.compareOp = VK_COMPARE_OP_ALWAYS;
+        sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        sampler_info.mipLodBias = 0.0f;
+        sampler_info.minLod = 0.0f;
+        sampler_info.maxLod = 0.0f;
+
+        if (vkCreateSampler(core.device, &sampler_info, nullptr, &texture_sampler) != VK_SUCCESS) {
+            std::println("无法创建纹理采样器!");
+            print_stacktrace_and_terminate();
+        }
+    }
+
+    void runtime::record_command_buffer(const uint32_t image_index, const vulkan_texture &vk_texture) const {
+            VkCommandBuffer cmd_buffer = core.command_buffers[core.current_frame];
+
+            VkCommandBufferBeginInfo begin_info{};
+            begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            begin_info.flags = 0;
+
+            if (vkBeginCommandBuffer(cmd_buffer, &begin_info) != VK_SUCCESS) {
+                std::println("无法开始记录命令缓冲区!");
+                print_stacktrace_and_terminate();
+            }
+
+            // 1. 开始渲染通道
+            VkRenderPassBeginInfo render_pass_info{};
+            render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            render_pass_info.renderPass = core.renderpass;
+            render_pass_info.framebuffer = core.swap_chain_framebuffers[image_index];
+            render_pass_info.renderArea.offset = {0, 0};
+            render_pass_info.renderArea.extent = core.swap_chain_extent;
+
+            std::array<VkClearValue, 2> clear_values{};
+            clear_values[0].color = {{0.0f, 0.2f, 0.4f, 1.0f}};  // 蓝色背景
+            clear_values[1].depthStencil = {1.0f, 0};
+
+            render_pass_info.clearValueCount = static_cast<uint32_t>(clear_values.size());
+            render_pass_info.pClearValues = clear_values.data();
+
+            vkCmdBeginRenderPass(cmd_buffer, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
+
+            // 2. 绑定管线
+            vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline);
+
+
+            vk_texture.update_to_descriptor_set(core.device, descriptor_set);
+            // 3. 绑定描述符集
+            if (descriptor_set != VK_NULL_HANDLE) {
+                vkCmdBindDescriptorSets(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                      pipeline_layout, 0, 1, &descriptor_set, 0, nullptr);
+            }
+
+            // 4. 绑定顶点缓冲区 - 确保使用正确的偏移量
+            if (vertex_buffer) {
+                const VkBuffer vertex_buffers[] = {*vertex_buffer};
+                constexpr VkDeviceSize offsets[] = {0};
+                vkCmdBindVertexBuffers(cmd_buffer, 0, 1, vertex_buffers, offsets);
+            } else {
+                std::cout << "警告: 顶点缓冲区为空!" << std::endl;
+            }
+
+            // 5. 设置视口和裁剪
+            VkViewport viewport{};
+            viewport.x = 0.0f;
+            viewport.y = 0.0f;
+            viewport.width = static_cast<float>(core.swap_chain_extent.width);
+            viewport.height = static_cast<float>(core.swap_chain_extent.height);
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
+            vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
+
+            VkRect2D scissor{};
+            scissor.offset = {0, 0};
+            scissor.extent = core.swap_chain_extent;
+            vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
+
+            // 6. 绘制命令 - 关键：使用索引绘制
+            if (index_buffer && index_count > 0) {
+                vkCmdBindIndexBuffer(cmd_buffer, *index_buffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(cmd_buffer, index_count, 1, 0, 0, 0);
+            } else if (vertex_buffer) {
+                std::cout << "无索引，直接绘制顶点" << std::endl;
+                const auto vertex_count = static_cast<uint32_t>(vertex_buffer.size / sizeof(vertex));
+                vkCmdDraw(cmd_buffer, vertex_count, 1, 0, 0);
+            } else {
+                std::cout << "无数据，绘制默认三角形" << std::endl;
+                vkCmdDraw(cmd_buffer, 3, 1, 0, 0);
+            }
+
+            vkCmdEndRenderPass(cmd_buffer);
+
+            if (vkEndCommandBuffer(cmd_buffer) != VK_SUCCESS) {
+                std::println("无法结束记录命令缓冲区!");
+                print_stacktrace_and_terminate();
+            }
+        }
+
+    void runtime::record_command_buffer_with_objects(const uint32_t image_index) const {
+            VkCommandBuffer cmd_buffer = core.command_buffers[core.current_frame];
+
+            VkCommandBufferBeginInfo begin_info{};
+            begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            begin_info.flags = 0;
+
+            if (vkBeginCommandBuffer(cmd_buffer, &begin_info) != VK_SUCCESS) {
+                std::println("无法开始记录命令缓冲区!");
+                print_stacktrace_and_terminate();
+            }
+
+            // 1. 开始渲染通道
+            VkRenderPassBeginInfo render_pass_info{};
+            render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            render_pass_info.renderPass = core.renderpass;
+            render_pass_info.framebuffer = core.swap_chain_framebuffers[image_index];
+            render_pass_info.renderArea.offset = {0, 0};
+            render_pass_info.renderArea.extent = core.swap_chain_extent;
+
+            std::array<VkClearValue, 2> clear_values{};
+            clear_values[0].color = {{0.0f, 0.2f, 0.4f, 1.0f}};
+            clear_values[1].depthStencil = {1.0f, 0};
+
+            render_pass_info.clearValueCount = static_cast<uint32_t>(clear_values.size());
+            render_pass_info.pClearValues = clear_values.data();
+
+            vkCmdBeginRenderPass(cmd_buffer, &render_pass_info, VK_SUBPASS_CONTENTS_INLINE);
+
+            // 2. 绑定管线 - 使用全局管线
+            vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_pipeline);
+
+            // 3. 设置视口和裁剪
+            VkViewport viewport{};
+            viewport.x = 0.0f;
+            viewport.y = 0.0f;
+            viewport.width = static_cast<float>(core.swap_chain_extent.width);
+            viewport.height = static_cast<float>(core.swap_chain_extent.height);
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
+            vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
+
+            VkRect2D scissor{};
+            scissor.offset = {0, 0};
+            scissor.extent = core.swap_chain_extent;
+            vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
+
+
+            // 5. 遍历并绘制所有对象
+            for (auto& object : objects) {
+                object.uniform_buffers.update_uniform_buffer(image_index, this->core);
+                // 绑定描述符集 - 每个对象有自己的描述符集
+                if (object.descriptor_set != VK_NULL_HANDLE) {
+                    vkCmdBindDescriptorSets(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                          pipeline_layout, 0, 1, &object.descriptor_set, 0, nullptr);
+                }
+
+                // 纹理已经在创建对象时更新到描述符集，不需要每次渲染都更新
+
+                const auto& mesh = object.mesh;
+                mesh.bind(cmd_buffer);
+
+                if (mesh.has_indices()) {
+                    vkCmdDrawIndexed(cmd_buffer,
+                                    static_cast<uint32_t>(mesh.get_index_count()),
+                                    1, 0, 0, 0);
+                } else {
+                    vkCmdDraw(cmd_buffer,
+                             static_cast<uint32_t>(mesh.get_vertex_count()),
+                             1, 0, 0);
+                }
+            }
+
+
+            vkCmdEndRenderPass(cmd_buffer);
+
+            if (vkEndCommandBuffer(cmd_buffer) != VK_SUCCESS) {
+                std::println("无法结束记录命令缓冲区!");
+                print_stacktrace_and_terminate();
+            }
+        }
+
+    void runtime::create_vulkan_texture(const std::vector<unsigned char> &texture, const int width, const int height, const VkFormat format) {
+            if (texture.empty()) {
+                std::println("纹理数据无效，无法创建Vulkan纹理");
+                print_stacktrace_and_terminate();
+            }
+
+            // 1. 创建临时缓冲区来传输纹理数据
+            VkBuffer staging_buffer;
+            VkDeviceMemory staging_buffer_memory;
+
+            create_buffer(
+                core.device,
+                core.physical_device,
+                texture.size(),
+                VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                staging_buffer,
+                staging_buffer_memory
+            );
+
+            // 2. 复制纹理数据到暂存缓冲区
+            void* data;
+            vkMapMemory(core.device, staging_buffer_memory, 0, texture.size(), 0, &data);
+            memcpy(data, texture.data(), texture.size());
+            vkUnmapMemory(core.device, staging_buffer_memory);
+
+            // 3. 创建纹理图像
+            create_texture_image(
+                core.device,
+                core.physical_device,
+                width,
+                height,
+                format,
+                VK_IMAGE_TILING_OPTIMAL,
+                VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+                texture_image,
+                texture_image_memory
+            );
+
+            // 4. 从暂存缓冲区复制到纹理图像
+            transition_image_layout(
+                core.device,
+                core.command_pool,
+                core.graphics_queue,
+                texture_image,
+                format,  // 根据实际格式调整
+                VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+            );
+
+            copy_buffer_to_image(
+                core.device,
+                core.command_pool,
+                core.graphics_queue,
+                staging_buffer,
+                texture_image,
+                static_cast<uint32_t>(width),
+                static_cast<uint32_t>(height)
+            );
+
+            // 5. 转换纹理图像到着色器可读状态
+            transition_image_layout(
+                core.device,
+                core.command_pool,
+                core.graphics_queue,
+                texture_image,
+                format,  // 根据实际格式调整
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            );
+
+            // 6. 清理暂存缓冲区
+            vkDestroyBuffer(core.device, staging_buffer, nullptr);
+            vkFreeMemory(core.device, staging_buffer_memory, nullptr);
+
+            // 7. 创建图像视图
+            texture_image_view = create_image_view(
+                core.device,
+                texture_image,
+                format,
+                VK_IMAGE_ASPECT_COLOR_BIT
+            );
+            // 8. 创建纹理采样器
+            VkSamplerCreateInfo sampler_info{};
+            sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+            sampler_info.magFilter = VK_FILTER_LINEAR;
+            sampler_info.minFilter = VK_FILTER_LINEAR;
+            sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            sampler_info.anisotropyEnable = VK_TRUE;
+            sampler_info.maxAnisotropy = 16;
+            sampler_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+            sampler_info.unnormalizedCoordinates = VK_FALSE;
+            sampler_info.compareEnable = VK_FALSE;
+            sampler_info.compareOp = VK_COMPARE_OP_ALWAYS;
+            sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+            sampler_info.mipLodBias = 0.0f;
+            sampler_info.minLod = 0.0f;
+            sampler_info.maxLod = 0.0f;
+            if (vkCreateSampler(core.device, &sampler_info, nullptr, &texture_sampler) != VK_SUCCESS) {
+                std::println("无法创建纹理采样器!");
+                print_stacktrace_and_terminate();
+            }
+        }
+
+
 }

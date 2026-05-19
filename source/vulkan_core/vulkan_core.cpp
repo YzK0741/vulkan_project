@@ -7,6 +7,30 @@
 #include <algorithm>
 #include "vulkan_core.h"
 
+VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
+    VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
+    VkDebugUtilsMessageTypeFlagsEXT message_type,
+    const VkDebugUtilsMessengerCallbackDataEXT *callback_data,
+    void *user_data
+    ) {
+
+    // 根据严重程度添加前缀
+    std::string prefix;
+    if (message_severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+        prefix = "[ERROR] ";
+    } else if (message_severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+        prefix = "[WARNING] ";
+    } else if (message_severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
+        prefix = "[INFO] ";
+    } else {
+        prefix = "[VERBOSE] ";
+    }
+
+    std::cerr << prefix << callback_data->pMessage << std::endl;
+    return VK_FALSE;  // 返回 VK_FALSE 表示不中止程序
+}
+
+
 namespace vulkan_core {
     bool check_validation_layer_support(const std::vector<const char*>& validation_layers) {
         uint32_t layer_count;
@@ -226,12 +250,6 @@ namespace vulkan_core {
         vkGetDeviceQueue(device, logical_device.present_family_index, 0,
                          &logical_device.present_queue);
 
-        // 可选：获取其他队列
-        // if (create_info.queue_families.compute_family) {
-        //     vkGetDeviceQueue(device, create_info.queue_families.compute_family.value(), 0,
-        //                      &logical_device.compute_queue);
-        // }
-
         return logical_device;
     }
 
@@ -278,6 +296,9 @@ namespace vulkan_core {
         }
     }
 
+    /**
+     * @remark hack: when find 0x3BA04C28 in present modes replace it with VK_PRESENT_MODE_MAILBOX_KHR
+     */
     swap_chain_support_details query_swap_chain_support(const VkPhysicalDevice& device, const VkSurfaceKHR& surface) {
         swap_chain_support_details details = {};
 
@@ -302,9 +323,6 @@ namespace vulkan_core {
 
         std::print("present modes count: {} \n", details.present_modes.size());
 
-        /*
-         * @note a hack while vulkan returned '0x3BA04C28', replace it with VK_PRESENT_MODE_MAILBOX_KHR
-         */
         std::ranges::for_each(details.present_modes, [](auto& x) {
             if (x == 0x3BA04C28) {
                 x = VK_PRESENT_MODE_MAILBOX_KHR;
