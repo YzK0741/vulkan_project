@@ -65,7 +65,7 @@ public:
         VkDeviceSize dst_offset = 0
     );
 
-    VkDeviceMemory get_device_memory(const VmaAllocation &allocation) const;
+    [[nodiscard]] VkDeviceMemory get_device_memory(const VmaAllocation &allocation) const;
 };
 
 
