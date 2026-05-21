@@ -65,4 +65,7 @@ If you want to try it yourself you can look up the main.cpp believe me it's easy
 ### Concepts and template based scene graph binding
 
 ## License
-    MIT, look at [`LICENSE`](LICENSE)
+MIT, look at [`LICENSE`](LICENSE)
+
+## Preview
+![Running screen shot](./screenshots/running.png)
