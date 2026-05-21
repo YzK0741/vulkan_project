@@ -1,21 +1,26 @@
 # vulkan_project
 Modern C++ Vulkan study project with GLTF support and RAII-style resource management.
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Vulkan](https://img.shields.io/badge/Vulkan-1.3-red)](https://www.vulkan.org/)
+[![C++](https://img.shields.io/badge/C%2B%2B-20/23-blue)](https://isocpp.org/)
+[![CMake](https://img.shields.io/badge/CMake-3.20+-064F8C)](https://cmake.org/)
+
 ## Features
 
-### 1. Core Graphics
+### Core Graphics
 
 - Vulkan 1.3 pipeline with MSAA anti-aliasing
 - Dynamic viewport and scissor states
 - Depth testing and color blending
 
-### 2. Memory Management
+### Memory Management
 
 - VMA (Vulkan Memory Allocator) integration (via VMA)
 - RAII wrappers with automatic cleanup
 - enable_destruct_stack<> for deterministic resource cleanup
 
-### 3. Modern C++
+### Modern C++
 
 - std::print
 - std::source_location
@@ -28,6 +33,9 @@ Modern C++ Vulkan study project with GLTF support and RAII-style resource manage
 
 - Implemented GLTF loading in gltf_loader
 
+## Preview
+![Running screen shot](./screenshots/running.png)
+
 ## Quick Start
 
 ### Requirements
@@ -35,7 +43,7 @@ Modern C++ Vulkan study project with GLTF support and RAII-style resource manage
 - CMake 3.20+ 
 - Vulkan SDK 1.2+
 - glm 1.0+
-- GLFW 1.0+
+- GLFW 3.0+
 - Tinygltf
 - Recent Clang (e.g., 16, 17)
 
@@ -47,10 +55,17 @@ Modern C++ Vulkan study project with GLTF support and RAII-style resource manage
     mkdir build
     cd build
     cmake .. -DCMAKE_BUILD_TYPE=Release
-    cmake --build . --config Release
+    cmake --build .
 ```
-If you want to try it yourself you can look up the main.cpp believe me it's easy.
+If you want to try it yourself you can look up the main.cpp, the code is designed to be straightforward.
 
+## Current Limitations
+
+### Constant Pipeline
+
+### PBR is not ready
+
+### May kill the gpu driver
 
 ## Visions
 
@@ -66,6 +81,3 @@ If you want to try it yourself you can look up the main.cpp believe me it's easy
 
 ## License
 MIT, look at [`LICENSE`](LICENSE)
-
-## Preview
-![Running screen shot](./screenshots/running.png)
