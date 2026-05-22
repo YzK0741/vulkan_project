@@ -66,6 +66,8 @@ If you want to try it yourself you can look up the main.cpp, the code is designe
 
 ## Current Limitations
 
+### Only Windows
+
 ### Constant Pipeline
 
 ### PBR is not ready
