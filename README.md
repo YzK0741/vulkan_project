@@ -16,9 +16,9 @@ Modern C++ Vulkan study project with GLTF support and RAII-style resource manage
 
 ### Memory Management
 
-- VMA (Vulkan Memory Allocator) integration (via VMA)
+- VMA (Vulkan Memory Allocator) integration (via class VMA [look at vma.h](./source/vulkan_core/vma/vma.h))
 - RAII wrappers with automatic cleanup
-- enable_destruct_stack<> for deterministic resource cleanup
+- template enable_destruct_stack<> for deterministic resource cleanup [look at utility.h](./source/utility.h)
 
 ### Modern C++
 
@@ -34,9 +34,13 @@ Modern C++ Vulkan study project with GLTF support and RAII-style resource manage
 - Implemented GLTF loading in gltf_loader
 
 ## Preview
-`./vulkan_project #default start, needs DamagedHelmet.glb`
+```bash 
+./vulkan_project #default start, './vulkan_project DamagedHelmet.glb 2.0'
+```
 ![Running screen shot](./screenshots/running.png)
-`./vulkan_project Duck.glb 0.01`
+```bash
+./vulkan_project Duck.glb 0.01
+```
 ![Duck](./screenshots/Duck.png)
 
 ## Quick Start
@@ -47,9 +51,25 @@ Modern C++ Vulkan study project with GLTF support and RAII-style resource manage
 - Vulkan SDK 1.3+
 - glm 1.0+
 - GLFW 3.0+
-- Boost 1.0+
+- Boost 1.70+ (using boost::stacktrace)
 - Tinygltf 2.0+
 - Recent Clang (e.g., 16, 17)
+
+
+- Requirements install
+
+```bash
+  # this is a MSYS2 Requirements install guide, other package managers are similar
+  pacman -S mingw-w64-clang-x86_64-clang \
+  mingw-w64-clang-x86_64-cmake \
+  mingw-w64-clang-x86_64-boost \
+  mingw-w64-clang-x86_64-boost-libs \
+  mingw-w64-clang-x86_64-vulkan-headers \
+  mingw-w64-clang-x86_64-vulkan-loaders \
+  mingw-w64-clang-x86_64-vulkan-memory-allocator \
+  mingw-w64-clang-x86_64-vulkan-validation-layers
+```
+
 
 ### Building 
 
@@ -60,13 +80,14 @@ Modern C++ Vulkan study project with GLTF support and RAII-style resource manage
     cd build
     cmake .. -DCMAKE_BUILD_TYPE=Release
     cmake --build .
-    ./vulkan_project module_path size #or default start with no argument but needs DamagedHelmet.glb
+    ./vulkan_project [model.glb] [scale_factor] # execute with no argument is same as './vulkan_project DamagedHelmet.glb 2.0'
 ```
 If you want to try it yourself you can look up the main.cpp, the code is designed to be straightforward.
 
 ## Current Limitations
 
-### Only Windows
+### Platform Support
+- Currently Windows only (MSYS2/Clang)
 
 ### Constant Pipeline
 
@@ -88,3 +109,5 @@ If you want to try it yourself you can look up the main.cpp, the code is designe
 
 ## License
 MIT, look at [`LICENSE`](LICENSE)
+
+PRs and issues are welcome! Your questions and feedback are highly valuable to me :-)
