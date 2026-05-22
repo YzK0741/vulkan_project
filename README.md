@@ -34,17 +34,21 @@ Modern C++ Vulkan study project with GLTF support and RAII-style resource manage
 - Implemented GLTF loading in gltf_loader
 
 ## Preview
+`./vulkan_project #default start, needs DamagedHelmet.glb`
 ![Running screen shot](./screenshots/running.png)
+`./vulkan_project Duck.glb 0.01`
+![Duck](./screenshots/Duck.png)
 
 ## Quick Start
 
 ### Requirements
 
 - CMake 3.20+ 
-- Vulkan SDK 1.2+
+- Vulkan SDK 1.3+
 - glm 1.0+
 - GLFW 3.0+
-- Tinygltf
+- Boost 1.0+
+- Tinygltf 2.0+
 - Recent Clang (e.g., 16, 17)
 
 ### Building 
@@ -56,6 +60,7 @@ Modern C++ Vulkan study project with GLTF support and RAII-style resource manage
     cd build
     cmake .. -DCMAKE_BUILD_TYPE=Release
     cmake --build .
+    ./vulkan_project module_path size #or default start with no argument but needs DamagedHelmet.glb
 ```
 If you want to try it yourself you can look up the main.cpp, the code is designed to be straightforward.
 
