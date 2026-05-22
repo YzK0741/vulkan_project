@@ -35,7 +35,7 @@ Modern C++ Vulkan study project with GLTF support and RAII-style resource manage
 
 ## Preview
 ```bash 
-./vulkan_project #default start, './vulkan_project DamagedHelmet.glb 2.0'
+./vulkan_project #default start, same as './vulkan_project DamagedHelmet.glb 2.0'
 ```
 ![Running screen shot](./screenshots/running.png)
 ```bash
