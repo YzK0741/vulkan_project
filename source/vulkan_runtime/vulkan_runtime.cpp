@@ -3,6 +3,8 @@
 //
 #include "vulkan_runtime.h"
 
+#include <expected>
+
 namespace vulkan_runtime {
     runtime::runtime()
             : core(),
@@ -15,6 +17,11 @@ namespace vulkan_runtime {
     }
 
     runtime::~runtime() {
+        auto result = this->stop_rendering();
+        if (!result && result.error() != "render thread did not create") {
+            std::println("error occurred while stopping render thread");
+            print_stacktrace_and_terminate();
+        }
         // 清理管线
         if (graphics_pipeline != VK_NULL_HANDLE) {
             vkDestroyPipeline(core.device, graphics_pipeline, nullptr);
@@ -146,7 +153,7 @@ namespace vulkan_runtime {
             frag_shader_stage_info.module = frag_shader_module;
             frag_shader_stage_info.pName = "main";
 
-            VkPipelineShaderStageCreateInfo shaderStages[] = {vert_shader_stage_info, frag_shader_stage_info};
+            VkPipelineShaderStageCreateInfo shader_stages[] = {vert_shader_stage_info, frag_shader_stage_info};
 
             // 输入装配状态
             VkPipelineInputAssemblyStateCreateInfo input_assembly{};
@@ -210,26 +217,26 @@ namespace vulkan_runtime {
             color_blending.pAttachments = &color_blend_attachment;
 
             // 深度测试
-            VkPipelineDepthStencilStateCreateInfo depthStencil{};
-            depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-            depthStencil.depthTestEnable = VK_TRUE;
-            depthStencil.depthWriteEnable = VK_TRUE;
-            depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
-            depthStencil.depthBoundsTestEnable = VK_FALSE;
-            depthStencil.stencilTestEnable = VK_FALSE;
+            VkPipelineDepthStencilStateCreateInfo depth_stencil{};
+            depth_stencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+            depth_stencil.depthTestEnable = VK_TRUE;
+            depth_stencil.depthWriteEnable = VK_TRUE;
+            depth_stencil.depthCompareOp = VK_COMPARE_OP_LESS;
+            depth_stencil.depthBoundsTestEnable = VK_FALSE;
+            depth_stencil.stencilTestEnable = VK_FALSE;
 
             // 创建管线
             VkGraphicsPipelineCreateInfo pipeline_info = {};
             pipeline_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
             pipeline_info.stageCount = 2;
-            pipeline_info.pStages = shaderStages;
+            pipeline_info.pStages = shader_stages;
             pipeline_info.pVertexInputState = &vertex_input_info;
             pipeline_info.pInputAssemblyState = &input_assembly;
             pipeline_info.pViewportState = &viewport_state;
             pipeline_info.pRasterizationState = &rasterizer;
             pipeline_info.pMultisampleState = &multisampling;
             pipeline_info.pColorBlendState = &color_blending;
-            pipeline_info.pDepthStencilState = &depthStencil;
+            pipeline_info.pDepthStencilState = &depth_stencil;
             pipeline_info.layout = pipeline_layout;
             pipeline_info.renderPass = core.renderpass;
             pipeline_info.subpass = 0;
@@ -255,40 +262,40 @@ namespace vulkan_runtime {
         int width, int height,
         VkFormat format
         ) {
-            std::vector<glm::vec3> positions;
-            std::vector<glm::vec3> normals;
-            std::vector<glm::vec2> tex_coords;
 
-            for (const auto&[position, normal, tex_coord] : vertices) {
-                positions.push_back(position);
-                normals.push_back(normal);
-                tex_coords.push_back(tex_coord);
-            }
+        std::vector<glm::vec3> positions;
+        std::vector<glm::vec3> normals;
+        std::vector<glm::vec2> tex_coords;
 
-            vulkan_renderable_object object = {vulkan_mesh_buffer(this->core, positions, normals, tex_coords, indexes)};
-
-            vulkan_texture texture;
-            if (texture_data.empty()) {
-                const stb_texture stb_texture1 = create_default_texture();
-
-                texture = this->create_texture(stb_texture1);
-            } else {
-                texture = create_texture(texture_data, width, height, format);
-            }
-
-            create_uniform_buffers();
-            object.uniform_buffers.uniform_buffers = std::move(this->uniform_buffers);
-            object.uniform_buffers.uniform_buffers_mapped = std::move(this->uniform_buffers_mapped);
-            object.uniform_buffers.uniform_buffers_memory = std::move(this->uniform_buffers_memory);
-
-            object.texture = texture;
-            object.descriptor_set = make_descriptor_sets(object.uniform_buffers.uniform_buffers[0]);
-            object.texture.update_to_descriptor_set(core.device,object.descriptor_set);
-
-            this->objects.push_back(std::move(object));
-
-            return *(objects.end() - 1);
+        for (const auto&[position, normal, tex_coord] : vertices) {
+            positions.push_back(position);
+            normals.push_back(normal);
+            tex_coords.push_back(tex_coord);
         }
+
+        vulkan_renderable_object object = {vulkan_mesh_buffer(this->core, positions, normals, tex_coords, indexes)};
+
+        vulkan_texture texture;
+        if (texture_data.empty()) {
+            const stb_texture stb_texture1 = create_default_texture();
+            texture = this->create_texture(stb_texture1);
+        } else {
+            texture = create_texture(texture_data, width, height, format);
+        }
+
+        create_uniform_buffers();
+        object.uniform_buffers.uniform_buffers = std::move(this->uniform_buffers);
+        object.uniform_buffers.uniform_buffers_mapped = std::move(this->uniform_buffers_mapped);
+        object.uniform_buffers.uniform_buffers_memory = std::move(this->uniform_buffers_memory);
+
+        object.texture = texture;
+        object.descriptor_set = make_descriptor_sets(object.uniform_buffers.uniform_buffers[0]);
+        object.texture.update_to_descriptor_set(core.device,object.descriptor_set);
+
+        std::unique_lock lock(this->render_lock);
+        this->objects.push_back(std::move(object));
+        return *(objects.end() - 1);
+    }
 
     vulkan_renderable_object &runtime::add_object(
         const std::vector<glm::vec3> &positions,
@@ -361,7 +368,11 @@ namespace vulkan_runtime {
         return this->add_object(positions, normals, tex_coords, indexes, "");
     }
 
-    void runtime::render_frame_with_objects() {
+    void runtime::render_frame() {
+        this->do_render_frame();
+    }
+
+    void runtime::do_render_frame() {
         int width = 0;
         int height = 0;
         glfwGetFramebufferSize(core.window, &width, &height);
@@ -959,4 +970,88 @@ namespace vulkan_runtime {
         }
 
 
+    std::expected<void, std::string_view> runtime::start_rendering() {
+        std::unique_lock lock(this->render_lock);
+        if (this->render_thread) {
+            return std::unexpected<std::string_view>("recreate render thread while it's not stopped");
+        } else {
+            this->render_thread = std::jthread([this](const std::stop_token& token) {
+                std::println("render thread thread started");
+                while (!token.stop_requested()) {
+                    std::unique_lock lock(this->render_lock);
+                    this->cv.wait(lock, [this]{return !this->pause_render_thread;});
+                    if (token.stop_requested()) break;
+                    this->do_render_frame();
+                }
+                std::println("render thread stopped");
+            });
+            return {};
+        }
+    }
+
+    std::expected<void, std::string_view> runtime::stop_rendering() {
+        std::unique_lock lock(this->render_lock);
+        if (this->render_thread) {
+            this->render_thread->request_stop();
+            if (this->pause_render_thread) {
+                if (const auto result = this->restore_rendering_no_lock(); !result) {
+                    std::println(stderr, "error occurred in stopping render thread");
+                    print_stacktrace_and_terminate();
+                }
+            }
+            lock.unlock();
+            this->render_thread->join();
+            this->render_thread.reset();
+            return {};
+        } else {
+            return std::unexpected<std::string_view>("render thread did not create");
+        }
+
+    }
+
+    std::expected<void, std::string_view> runtime::pause_rendering() {
+        std::unique_lock lock(this->render_lock);
+        if (this->render_thread) {
+            if (!this->pause_render_thread) {
+                this->pause_render_thread = true;
+                return {};
+            } else {
+                return std::unexpected<std::string_view>("pause thread was already paused");
+            }
+        } else {
+            return std::unexpected<std::string_view>("render thread did not create");
+        }
+
+    }
+
+    std::expected<void, std::string_view> runtime::restore_rendering() {
+        std::unique_lock lock(this->render_lock);
+        if (this->render_thread) {
+            if (this->pause_render_thread) {
+                this->pause_render_thread = false;
+                this->cv.notify_one();
+                return {};
+            }
+            else {
+                return std::unexpected<std::string_view>("render thread did not pause");
+            }
+        } else {
+            return std::unexpected<std::string_view>("render thread did not create");
+        }
+    }
+
+    std::expected<void, std::string_view> runtime::restore_rendering_no_lock() {
+        if (this->render_thread) {
+            if (this->pause_render_thread) {
+                this->pause_render_thread = false;
+                this->cv.notify_one();
+                return {};
+            }
+            else {
+                return std::unexpected<std::string_view>("render thread did not pause");
+            }
+        } else {
+            return std::unexpected<std::string_view>("render thread did not create");
+        }
+    }
 }

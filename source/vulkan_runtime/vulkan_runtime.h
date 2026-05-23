@@ -6,6 +6,8 @@
 #define VULKAN_PROJECT_VULKAN_RUNTIME_H
 
 //#include <stb/stb_image_write.h>
+#include <barrier>
+#include <expected>
 #include <thread>
 #include "../vulkan_core/vulkan_core.h"
 #include "../vulkan_core/vulkan_utility.h"
@@ -597,6 +599,13 @@ namespace vulkan_runtime {
         // 为特定网格创建管线
         [[nodiscard]] VkPipeline create_pipeline();
 
+        std::optional<std::jthread> render_thread;
+        std::condition_variable cv;
+        std::mutex render_lock;
+        bool pause_render_thread = false;
+
+        std::expected<void, std::string_view> restore_rendering_no_lock();
+
     public:
         runtime();
 
@@ -620,13 +629,23 @@ namespace vulkan_runtime {
             VkFormat format = VK_FORMAT_UNDEFINED
             );
 
-        void render_frame_with_objects();
+        void render_frame();
+
+        std::expected<void, std::string_view> start_rendering();
+
+        std::expected<void, std::string_view> stop_rendering();
+
+        std::expected<void, std::string_view> pause_rendering();
+
+        std::expected<void, std::string_view> restore_rendering();
 
         // 获取窗口
         [[nodiscard]] GLFWwindow* get_window() const { return core.window; }
 
     private:
         void update_uniform_buffer(uint32_t current_image) const;
+
+        void do_render_frame();
 
         // 从PNG数据加载纹理
         void load_png_texture(const std::string& filepath);
@@ -647,7 +666,7 @@ namespace vulkan_runtime {
             );
 
             update_descriptor_sets();  // 更新描述符集
-            std::cout << "PNG纹理从数据加载成功" << std::endl;
+            std::println("PNG纹理从数据加载成功");
         }
 
 
@@ -975,8 +994,6 @@ namespace vulkan_runtime {
 
         // 创建纹理采样器
         void create_texture_sampler();
-
-
 
         void record_command_buffer(uint32_t image_index, const vulkan_texture& vk_texture) const;
 
