@@ -31,69 +31,12 @@ namespace vulkan_runtime {
         static void create_buffer_from_vector(
             core& core,
             const std::vector<T>& data,
-            const VkBufferUsageFlags usage_flags,
+            VkBufferUsageFlags usage_flags,
             VkBuffer& buffer,
             VkDeviceMemory& device_memory
-            ) {
-            if (data.empty()) {
-                buffer = VK_NULL_HANDLE;
-                device_memory = VK_NULL_HANDLE;
-                return;
-            }
+            );
 
-            const VkDeviceSize size = sizeof(T) * data.size();
-            VkBuffer staging_buffer = VK_NULL_HANDLE;
-            VkDeviceMemory staging_memory = VK_NULL_HANDLE;
-            create_buffer(
-                core.device,
-                core.physical_device,
-                size,
-                VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                staging_buffer,
-                staging_memory);
-
-            void *mapped_data = nullptr;
-            const VkResult result = vkMapMemory(core.device, staging_memory, 0, size, 0, &mapped_data);
-            if (result != VK_SUCCESS) {
-                std::println("Failed to map memory for staging buffer");
-                print_stacktrace_and_terminate();
-            }
-            memcpy(mapped_data, data.data(), size);
-            vkUnmapMemory(core.device, staging_memory);
-
-            create_buffer(
-                core.device,
-                core.physical_device,
-                size,
-                VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage_flags,
-                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
-                buffer,
-                device_memory);
-
-            core.copy_buffer(staging_buffer, buffer, size);
-
-            vkDestroyBuffer(core.device, staging_buffer, nullptr);
-            vkFreeMemory(core.device, staging_memory, nullptr);
-
-        }
-
-        void cleanup() {
-            auto& core = core_ref.get();
-            auto destroy_buffer = [&core](VkBuffer& buffer, VkDeviceMemory& memory) {
-                if (buffer != VK_NULL_HANDLE) {
-                    vkDestroyBuffer(core.device, buffer, nullptr);
-                    buffer = VK_NULL_HANDLE;
-                }
-                if (memory != VK_NULL_HANDLE) {
-                    vkFreeMemory(core.device, memory, nullptr);
-                    memory = VK_NULL_HANDLE;
-                }
-            };
-
-            destroy_buffer(interleaved_vertex_buffer, interleaved_vertex_memory);
-            destroy_buffer(index_buffer, index_memory);
-        }
+        void cleanup();
 
     public:
         // 交错顶点缓冲区（包含所有顶点属性）
@@ -468,41 +411,7 @@ namespace vulkan_runtime {
         std::vector<VkBuffer> uniform_buffers;
         std::vector<VkDeviceMemory> uniform_buffers_memory;
         std::vector<void*> uniform_buffers_mapped;
-        std::function<void(uniform_buffer_object&, const core&)> update_mvp = [](uniform_buffer_object& ubo, const core& core) {
-            // 1. 模型矩阵：根据您的模型大小调整
-            static float angle = 0.0f;
-            angle += glm::radians(0.1f);  // 每秒旋转
-
-            ubo.model = glm::mat4(1.0f);
-            ubo.model = glm::scale(ubo.model, glm::vec3(2.0f,  2.0f, 2.0f));  // 缩放
-
-            // 修正旋转：将模型的Z轴向上转为Y轴向上
-            ubo.model = glm::rotate(ubo.model, glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-
-            // 2. 向下平移（注意坐标系方向！）
-            //ubo.model = glm::translate(ubo.model, glm::vec3(0.0f, -1.0f, 0.0f));  // 向下移动1个单位
-
-            ubo.model = glm::rotate(ubo.model, angle, glm::vec3(0.0f, 0.0f, 1.0f));  // 持续旋转
-
-            // 2. 视图矩阵：调整相机位置
-            ubo.view = glm::lookAt(
-                glm::vec3(3.0f, 3.0f, 3.0f),  // 相机位置
-                glm::vec3(0.0f, 0.0f, 0.0f),  // 观察目标
-                glm::vec3(0.0f, 0.0f, 1.0f)   // 上方向（Z轴向上）
-            );
-
-            // 3. 投影矩阵
-            ubo.proj = glm::perspective(
-                glm::radians(60.0f),  // 视野角度
-                static_cast<float>(core.swap_chain_extent.width) /
-                            static_cast<float>(core.swap_chain_extent.height),
-                0.1f,    // 近平面
-                100.0f   // 远平面
-            );
-
-            // Vulkan的Y轴是向下的，需要翻转
-            ubo.proj[1][1] *= -1;
-        };
+        std::function<void(uniform_buffer_object&, const core&)> update_mvp;
         void update_uniform_buffer(const uint32_t current_image, const core& core) const {
             uniform_buffer_object ubo{};
             update_mvp(ubo, core);
@@ -638,6 +547,8 @@ namespace vulkan_runtime {
         std::expected<void, std::string_view> pause_rendering();
 
         std::expected<void, std::string_view> restore_rendering();
+
+        std::unique_lock<std::mutex> wait_frame();
 
         // 获取窗口
         [[nodiscard]] GLFWwindow* get_window() const { return core.window; }

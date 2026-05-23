@@ -32,6 +32,7 @@ add_executable(vulkan_project main.cpp
         source/vulkan_core/vma/vma_waiter.cpp
         source/vulkan_core/vma/vma_waiter.h
         source/vulkan_runtime/texture.cpp
+        source/vulkan_runtime/pipeline.h
 )
 
 target_link_libraries(${PROJECT_NAME}

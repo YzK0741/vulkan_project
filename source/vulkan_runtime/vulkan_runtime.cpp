@@ -1,11 +1,81 @@
 //
 // Created by 小叶 on 2026/5/17.
 //
-#include "vulkan_runtime.h"
 
 #include <expected>
+#include "../vulkan_core/vulkan_core.h"
+#include "vulkan_runtime.h"
+
 
 namespace vulkan_runtime {
+    template<typename T>
+    void vulkan_mesh_buffer::create_buffer_from_vector(
+        core &core,
+        const std::vector<T> &data,
+        const VkBufferUsageFlags usage_flags,
+        VkBuffer &buffer,
+        VkDeviceMemory &device_memory
+        ) {
+        if (data.empty()) {
+            buffer = VK_NULL_HANDLE;
+            device_memory = VK_NULL_HANDLE;
+            return;
+        }
+
+        const VkDeviceSize size = sizeof(T) * data.size();
+        VkBuffer staging_buffer = VK_NULL_HANDLE;
+        VkDeviceMemory staging_memory = VK_NULL_HANDLE;
+        create_buffer(
+            core.device,
+            core.physical_device,
+            size,
+            VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            staging_buffer,
+            staging_memory);
+
+        void *mapped_data = nullptr;
+        const VkResult result = vkMapMemory(core.device, staging_memory, 0, size, 0, &mapped_data);
+        if (result != VK_SUCCESS) {
+            std::println("Failed to map memory for staging buffer");
+            print_stacktrace_and_terminate();
+        }
+        memcpy(mapped_data, data.data(), size);
+        vkUnmapMemory(core.device, staging_memory);
+
+        create_buffer(
+            core.device,
+            core.physical_device,
+            size,
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage_flags,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+            buffer,
+            device_memory);
+
+        core.copy_buffer(staging_buffer, buffer, size);
+
+        vkDestroyBuffer(core.device, staging_buffer, nullptr);
+        vkFreeMemory(core.device, staging_memory, nullptr);
+
+    }
+
+    void vulkan_mesh_buffer::cleanup() {
+        auto& core = core_ref.get();
+        auto destroy_buffer = [&core](VkBuffer& buffer, VkDeviceMemory& memory) {
+            if (buffer != VK_NULL_HANDLE) {
+                vkDestroyBuffer(core.device, buffer, nullptr);
+                buffer = VK_NULL_HANDLE;
+            }
+            if (memory != VK_NULL_HANDLE) {
+                vkFreeMemory(core.device, memory, nullptr);
+                memory = VK_NULL_HANDLE;
+            }
+        };
+
+        destroy_buffer(interleaved_vertex_buffer, interleaved_vertex_memory);
+        destroy_buffer(index_buffer, index_memory);
+    }
+
     runtime::runtime()
             : core(),
               creator(core.device, core.physical_device, core.command_pool, core.graphics_queue),
@@ -17,11 +87,14 @@ namespace vulkan_runtime {
     }
 
     runtime::~runtime() {
-        auto result = this->stop_rendering();
-        if (!result && result.error() != "render thread did not create") {
-            std::println("error occurred while stopping render thread");
-            print_stacktrace_and_terminate();
+        if (this->render_thread) {
+            std::println("render thread is not destroyed until runtime start destroying");
+            if (auto result = this->stop_rendering(); !result && result.error() != "render thread did not create") {
+                std::println("error occurred while stopping render thread");
+                print_stacktrace_and_terminate();
+            }
         }
+
         // 清理管线
         if (graphics_pipeline != VK_NULL_HANDLE) {
             vkDestroyPipeline(core.device, graphics_pipeline, nullptr);
@@ -1053,5 +1126,9 @@ namespace vulkan_runtime {
         } else {
             return std::unexpected<std::string_view>("render thread did not create");
         }
+    }
+
+    std::unique_lock<std::mutex> runtime::wait_frame() {
+        return std::unique_lock(this->render_lock);
     }
 }
