@@ -67,7 +67,9 @@ Modern C++ Vulkan study project with GLTF support and RAII-style resource manage
   mingw-w64-clang-x86_64-vulkan-headers \
   mingw-w64-clang-x86_64-vulkan-loaders \
   mingw-w64-clang-x86_64-vulkan-memory-allocator \
-  mingw-w64-clang-x86_64-vulkan-validation-layers
+  mingw-w64-clang-x86_64-vulkan-validation-layers \
+  mingw-w64-clang-x86_64-glfw \
+  mingw-w64-clang-x86_64-glm
 ```
 
 
