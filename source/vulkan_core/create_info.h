@@ -10,7 +10,9 @@
 namespace vulkan_core{
 
     struct create_info {
-        int w = 1080, h = 960;
+        int width = 1080, height = 960;
+        std::string_view window_name;
+        VkInstance instance = VK_NULL_HANDLE;
         VkPresentModeKHR preferred_present_mode = VK_PRESENT_MODE_FIFO_KHR;
     };
 }

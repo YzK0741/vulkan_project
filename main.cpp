@@ -77,7 +77,7 @@ int main(const int argc, const char** argv) {
             glfwSetWindowShouldClose(runtime.get_window(), GLFW_TRUE);
         }
 
-        runtime.render_frame_with_objects();
+        runtime.render_frame();
         frame_count++;
 
         // 计算帧率
