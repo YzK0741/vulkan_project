@@ -9,6 +9,7 @@
 #include <barrier>
 #include <expected>
 #include <thread>
+#include "create_info.h"
 #include "../vulkan_core/vulkan_core.h"
 #include "../vulkan_core/vulkan_utility.h"
 #include "../loader/png_loader.h"
@@ -517,6 +518,8 @@ namespace vulkan_runtime {
 
     public:
         runtime();
+
+        explicit runtime(const create_info &create_info);
 
         vulkan_renderable_object& add_object(const std::vector<glm::vec3>& positions,
                         const std::vector<glm::vec3>& normals,

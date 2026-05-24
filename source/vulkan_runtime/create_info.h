@@ -1,14 +1,15 @@
 //
-// Created by 小叶 on 2026/4/12.
+// Created by 小叶 on 2026/5/24.
 //
 
-#ifndef VULKAN_PROJECT_CORE_CREATE_INFO_H
-#define VULKAN_PROJECT_CORE_CREATE_INFO_H
+#ifndef VULKAN_PROJECT_CREATE_INFO_H
+#define VULKAN_PROJECT_CREATE_INFO_H
 
 #include <vulkan/vulkan.h>
+#include <string_view>
 
-namespace vulkan_core{
 
+namespace vulkan_runtime {
     struct create_info {
         int width = 1080, height = 960;
         std::string_view window_name;
@@ -17,6 +18,4 @@ namespace vulkan_core{
     };
 }
 
-
-
-#endif //VULKAN_PROJECT_CORE_CREATE_INFO_H
+#endif //VULKAN_PROJECT_CREATE_INFO_H
