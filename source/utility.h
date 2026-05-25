@@ -100,6 +100,16 @@ protected:
     Ht handler_up_bound = lowest - 1;
     std::mutex mutex;
 
+private:
+    bool is_valid_handler_no_lock(const Ht& handler) noexcept {
+        if (handler <= this->handler_up_bound &&
+            lowest <= handler &&
+            std::ranges::find(this->recycled_handlers, handler) == this->recycled_handlers.end()) {
+            return true;
+            }
+        return false;
+    }
+
 public:
 
     enable_handler_distribute() {
@@ -115,7 +125,7 @@ public:
             this->recycled_handlers.pop_back();
             return handler;
         }
-        if (this->handler_up_bound <= biggest) {
+        if (this->handler_up_bound < biggest) {
             ++this->handler_up_bound;
             return this->handler_up_bound;
         }
@@ -124,7 +134,7 @@ public:
 
     std::expected<void, std::string_view> recycle_handler(const Ht& handler) noexcept {
         std::unique_lock lock(mutex);
-        if (is_valid_handler(handler))  {
+        if (this->is_valid_handler_no_lock(handler))  {
             this->recycled_handlers.push_back(handler);
             return {};
         }
@@ -134,12 +144,7 @@ public:
 
     bool is_valid_handler(const Ht& handler) noexcept {
         std::unique_lock lock(mutex);
-        if (handler <= this->handler_up_bound &&
-            lowest <= handler &&
-            std::ranges::find(this->recycled_handlers, handler) == this->recycled_handlers.end()) {
-            return true;
-        }
-        return false;
+        return is_valid_handler_no_lock(handler);
     }
 
     void reset() noexcept {
