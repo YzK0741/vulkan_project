@@ -72,7 +72,9 @@ namespace vulkan_runtime {
         image_info.samples = VK_SAMPLE_COUNT_1_BIT;
         image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        const auto&[image, image_allocation] = core.vma.create_image(image_info); // NOLINT(*-misplaced-const)
+        const auto image_handler = this->core.vma.create_image(image_info);
+
+        const auto&[image, image_allocation] = this->core.vma.get_image(image_handler); // NOLINT(*-misplaced-const)
 
         waiter.wait();
 
@@ -142,7 +144,9 @@ namespace vulkan_runtime {
         image_info.samples = VK_SAMPLE_COUNT_1_BIT;
         image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        const auto&[image, image_allocation] = core.vma.create_image(image_info); // NOLINT(*-misplaced-const)
+        const auto image_handler = this->core.vma.create_image(image_info);
+
+        const auto&[image, image_allocation] = this->core.vma.get_image(image_handler); // NOLINT(*-misplaced-const
 
         waiter.wait();
 

@@ -22,11 +22,15 @@ int main(const int argc, const char** argv) {
     // 创建Vulkan运行时
     vulkan_runtime::runtime runtime;
 
-    vulkan_runtime::vulkan_renderable_object* object;
+    vulkan_runtime::vulkan_renderable_object* object = nullptr;
 
     for (auto gltf_data = gltf_data_future.get();
         const auto&[model, texture_data, texture_width, texture_height, texture_format] : gltf_data) {
         object = &runtime.add_object(model.vertices, model.indices,  texture_data, texture_width, texture_height, texture_format);
+    }
+
+    if (!object) {
+        print_stacktrace_and_terminate();
     }
 
     object->change_mvp_method([module_size](vulkan_runtime::uniform_buffer_object& ubo, const vulkan_core::core& core) {

@@ -49,6 +49,9 @@ void VMA::destroy() const {
     for (const auto &[buffer, allocation]: this->buffers | std::views::values) { // NOLINT(*-misplaced-const)
         vmaDestroyBuffer(this->allocator, buffer, allocation);
     }
+    for (const auto &[image, allocation]: this->images | std::views::values) { // NOLINT(*-misplaced-const)
+        vmaDestroyImage(this->allocator, image, allocation);
+    }
     if (this->command_pool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(this->device, this->command_pool, nullptr);
     }
@@ -95,7 +98,7 @@ void VMA::destroy_buffer(const handler buffer_handler) {
 
 }
 
-vma_image VMA::create_image(const VkImageCreateInfo &image_create_info) const {
+enable_handler_distribute<VMA>::handler VMA::create_image(const VkImageCreateInfo &image_create_info) {
     VmaAllocationCreateInfo allocation_create_info = {};
     allocation_create_info.usage = VMA_MEMORY_USAGE_AUTO;
 
@@ -104,11 +107,26 @@ vma_image VMA::create_image(const VkImageCreateInfo &image_create_info) const {
 
     vmaCreateImage(this->allocator, &image_create_info, &allocation_create_info, &image, &allocation, nullptr);
 
-    return {image, allocation};
+    if (auto expected_handler = this->distribute_handler()) {
+        const auto handler = expected_handler.value();
+        this->images[handler] = {image, allocation};
+        return handler;
+    } else {
+        std::println("failed to distribute handler: {}", expected_handler.value());
+        print_stacktrace_and_terminate();
+    }
 }
 
-void VMA::destroy_image(const vma_image &image) const {
-    vmaDestroyImage(this->allocator, image.image, image.allocation);
+void VMA::destroy_image(const handler &image_handler) {
+    if (this->images.contains(image_handler)) {
+        const auto&[image, allocation] = this->images[image_handler]; // NOLINT(*-misplaced-const)
+        vmaDestroyImage(this->allocator, image, allocation);
+        this->images.erase(image_handler);
+        if (auto result = this->recycle_handler(image_handler); !result) {
+            std::println("failed to recycle handler: {}", result.error());
+        }
+    }
+
 }
 
 std::pair<VkBuffer, VmaAllocation> make_staging_buffer(const VmaAllocator& allocator, const VkDeviceSize size) {
@@ -189,6 +207,15 @@ vma_waiter VMA::update_to_buffer(
 
 const vma_buffer &VMA::get_buffer(const handler buffer_handle) {
     return this->buffers[buffer_handle];
+}
+
+const vma_image &VMA::get_image(const handler &image_handle) {
+    if (this->images.contains(image_handle)) {
+        return this->images[image_handle];
+    } else {
+        std::println(stderr, "handle does not exit");
+        print_stacktrace_and_terminate();
+    }
 }
 
 
