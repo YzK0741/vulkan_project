@@ -46,12 +46,13 @@ namespace vulkan_runtime {
         buffer_create_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
         buffer_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        const auto& [buffer, allocation] = this->core.vma.create_buffer(buffer_create_info); // NOLINT(*-misplaced-const)
+        auto handler = this->core.vma.create_buffer(buffer_create_info); // NOLINT(*-misplaced-const)
 
         auto waiter = this->core.vma.update_to_buffer(
             texture.pixels,
-            buffer,
-            texture.image_size
+            handler,
+            texture.image_size,
+            0
         );
 
         VkImageCreateInfo image_info{};
@@ -114,12 +115,14 @@ namespace vulkan_runtime {
         buffer_create_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
         buffer_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        const auto& [buffer, allocation] = this->core.vma.create_buffer(buffer_create_info); // NOLINT(*-misplaced-const)
+        const auto handler = this->core.vma.create_buffer(buffer_create_info); // NOLINT(*-misplaced-const)
+        const auto& [buffer, allocation] = core.vma.get_buffer(handler); // NOLINT(*-misplaced-const)
 
         auto waiter = this->core.vma.update_to_buffer(
             texture.data(),
-            buffer,
-            texture.size()
+            handler,
+            texture.size(),
+            0
         );
 
         VkImageCreateInfo image_info{};

@@ -7,6 +7,7 @@
 
 #include <vma/vk_mem_alloc.h>
 #include "vma_waiter.h"
+#include "../../utility.h"
 
 struct vma_buffer {
     VkBuffer buffer;
@@ -18,12 +19,13 @@ struct vma_image {
     VmaAllocation allocation;
 };
 
-class VMA {
+class VMA : enable_handler_distribute<VMA> {
     VkDevice device = VK_NULL_HANDLE;
     VkQueue queue = VK_NULL_HANDLE;
     VkCommandPool command_pool = VK_NULL_HANDLE;
     VmaAllocator allocator = VK_NULL_HANDLE;
     std::mutex mutex;
+    std::unordered_map<handler,vma_buffer> buffers;
 
     void do_upload_to_buffer(const VkBuffer &staging_buffer, const VmaAllocation &staging_buffer_allocation,
                              const void *source,
@@ -49,9 +51,11 @@ public:
 
     void destroy() const;
 
-    [[nodiscard]] vma_buffer create_buffer(const VkBufferCreateInfo &buffer_create_info) const;
+    [[nodiscard]] handler create_buffer(const VkBufferCreateInfo &buffer_create_info);
 
-    void destroy_buffer(const vma_buffer &buffer) const;
+    [[nodiscard]] const vma_buffer& get_buffer(handler buffer_handle);
+
+    void destroy_buffer(long buffer_handler);
 
     [[nodiscard]] vma_image create_image(const VkImageCreateInfo &image_create_info) const;
 
@@ -59,10 +63,9 @@ public:
 
     vma_waiter update_to_buffer(
         const void *source,
-        const VkBuffer &destination,
+        handler buffer_handler,
         VkDeviceSize size,
-        VkDeviceSize src_offset = 0,
-        VkDeviceSize dst_offset = 0
+        VkDeviceSize src_offset
     );
 
     [[nodiscard]] VkDeviceMemory get_device_memory(const VmaAllocation &allocation) const;

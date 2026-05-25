@@ -13,6 +13,8 @@
 #include "../../utility.h"
 #include "vma.h"
 
+#include <ranges>
+
 
 void VMA::init(
     const VkInstance &instance,
@@ -44,6 +46,9 @@ void VMA::init(
 }
 
 void VMA::destroy() const {
+    for (const auto &[buffer, allocation]: this->buffers | std::views::values) { // NOLINT(*-misplaced-const)
+        vmaDestroyBuffer(this->allocator, buffer, allocation);
+    }
     if (this->command_pool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(this->device, this->command_pool, nullptr);
     }
@@ -52,7 +57,7 @@ void VMA::destroy() const {
     }
 }
 
-vma_buffer VMA::create_buffer(const VkBufferCreateInfo &buffer_create_info) const {
+enable_handler_distribute<VMA>::handler VMA::create_buffer(const VkBufferCreateInfo &buffer_create_info) {
 
     VmaAllocationCreateInfo allocation_create_info = {};
     allocation_create_info.usage = VMA_MEMORY_USAGE_AUTO;
@@ -62,11 +67,32 @@ vma_buffer VMA::create_buffer(const VkBufferCreateInfo &buffer_create_info) cons
 
     vmaCreateBuffer(this->allocator, &buffer_create_info, &allocation_create_info, &buffer, &allocation, nullptr);
 
-    return {buffer, allocation};
+    if (auto expected_handler = this->distribute_handler()) {
+        const auto handler = expected_handler.value();
+        this->buffers[handler] = {buffer, allocation};
+        return handler;
+    } else {
+        std::println("failed to distribute handler: {}", expected_handler.value());
+        print_stacktrace_and_terminate();
+    }
 }
 
-void VMA::destroy_buffer(const vma_buffer &buffer) const {
-    vmaDestroyBuffer(this->allocator, buffer.buffer, buffer.allocation);
+void VMA::destroy_buffer(const handler buffer_handler) {
+    if (this->buffers.contains(buffer_handler)) {
+        if (is_valid_handler(buffer_handler)) {
+            const auto&[buffer, allocation] = buffers[buffer_handler]; // NOLINT(*-misplaced-const)
+            vmaDestroyBuffer(this->allocator, buffer, allocation);
+            this->buffers.erase(buffer_handler);
+            if (const auto result = this->recycle_handler(buffer_handler); !result) {
+                std::println(stderr, "can not recycle buffer handler [{}], {}", buffer_handler, result.error());
+            }
+        } else {
+            std::println("invalid buffer handler [{}]", buffer_handler);
+        }
+    } else {
+        std::println("buffer does not exit");
+    }
+
 }
 
 vma_image VMA::create_image(const VkImageCreateInfo &image_create_info) const {
@@ -124,13 +150,19 @@ VkCommandBuffer create_command_buffer(VkDevice device,const VkCommandPool& comma
 
 vma_waiter VMA::update_to_buffer(
     const void *source,
-    const VkBuffer &destination,
+    const handler buffer_handler,
     const VkDeviceSize size,
-    const VkDeviceSize src_offset,
-    const VkDeviceSize dst_offset
+    const VkDeviceSize src_offset
 ) {
 
     const auto& [staging_buffer, staging_buffer_allocation] = make_staging_buffer(this->allocator, size);
+
+    const auto& [des, allocation] = this->buffers[buffer_handler]; // NOLINT(*-misplaced-const)
+
+    VmaAllocationInfo des_info = {};
+    vmaGetAllocationInfo(this->allocator, allocation, &des_info);
+
+    const auto dst_offset = des_info.offset;
 
     this->mutex.lock();
     const VkCommandBuffer& command_buffer = create_command_buffer(this->device, this->command_pool);
@@ -141,7 +173,7 @@ vma_waiter VMA::update_to_buffer(
     std::future<void> future = std::async(std::launch::async,
         [=,this] {
             this->do_upload_to_buffer(staging_buffer,
-                staging_buffer_allocation,source, destination, command_buffer, fence, size, src_offset, dst_offset); // NOLINT(*-misplaced-const)
+                staging_buffer_allocation,source, des, command_buffer, fence, size, src_offset, dst_offset); // NOLINT(*-misplaced-const)
         });
 
     return {
@@ -153,6 +185,10 @@ vma_waiter VMA::update_to_buffer(
             vkFreeCommandBuffers(this->device, this->command_pool, 1, &command_buffer);
             vmaDestroyBuffer(this->allocator, staging_buffer, staging_buffer_allocation);}
     };
+}
+
+const vma_buffer &VMA::get_buffer(const handler buffer_handle) {
+    return this->buffers[buffer_handle];
 }
 
 

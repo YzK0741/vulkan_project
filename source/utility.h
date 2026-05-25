@@ -98,10 +98,10 @@ class enable_handler_distribute {
 protected:
     std::vector<Ht> recycled_handlers;
     Ht handler_up_bound = lowest - 1;
-    std::mutex mutex;
+    mutable std::mutex distribute_mutex;
 
 private:
-    bool is_valid_handler_no_lock(const Ht& handler) noexcept {
+    bool is_valid_handler_no_lock(const Ht& handler) const noexcept  {
         if (handler <= this->handler_up_bound &&
             lowest <= handler &&
             std::ranges::find(this->recycled_handlers, handler) == this->recycled_handlers.end()) {
@@ -110,7 +110,9 @@ private:
         return false;
     }
 
-public:
+protected:
+
+    using handler = Ht;
 
     enable_handler_distribute() {
         static_assert(lowest > std::numeric_limits<Ht>::min());
@@ -119,7 +121,7 @@ public:
     }
 
     std::expected<Ht, std::string_view> distribute_handler() noexcept {
-        std::unique_lock lock(mutex);
+        std::unique_lock lock(this->distribute_mutex);
         if (!this->recycled_handlers.empty()) {
             Ht handler = this->recycled_handlers.back();
             this->recycled_handlers.pop_back();
@@ -133,7 +135,7 @@ public:
     }
 
     std::expected<void, std::string_view> recycle_handler(const Ht& handler) noexcept {
-        std::unique_lock lock(mutex);
+        std::unique_lock lock(this->distribute_mutex);
         if (this->is_valid_handler_no_lock(handler))  {
             this->recycled_handlers.push_back(handler);
             return {};
@@ -142,15 +144,15 @@ public:
         return std::unexpected("invalid handler");
     }
 
-    bool is_valid_handler(const Ht& handler) noexcept {
-        std::unique_lock lock(mutex);
-        return is_valid_handler_no_lock(handler);
+    bool is_valid_handler(const Ht& handler) const noexcept {
+        std::unique_lock lock(this->distribute_mutex);
+        return this->is_valid_handler_no_lock(handler);
     }
 
     void reset() noexcept {
-        std::unique_lock lock(mutex);
-        recycled_handlers.clear();
-        handler_up_bound = lowest - 1;
+        std::unique_lock lock(this->distribute_mutex);
+        this->recycled_handlers.clear();
+        this->handler_up_bound = lowest - 1;
     }
 };
 

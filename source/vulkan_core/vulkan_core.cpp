@@ -613,6 +613,7 @@ namespace vulkan_core {
     }
 
     core::~core() {
+        this->vma.destroy();
         this->cleanup();
     }
 
