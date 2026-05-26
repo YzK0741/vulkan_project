@@ -118,7 +118,7 @@ namespace vulkan_core {
 
         GLFWwindow* window = nullptr;
 
-        void init_window(const int width = WIDTH, const int height = HEIGHT, std::string_view window_name = "") noexcept;
+        void init_window(int width = WIDTH, int height = HEIGHT, std::string_view window_name = "") noexcept;
 
         VMA vma;
 
@@ -248,20 +248,20 @@ namespace vulkan_core {
 
         void get_image_index(uint32_t& image_index, VkResult& result) const;
 
-        void wait_usable_image(const uint32_t image_index);
+        void wait_usable_image(uint32_t image_index);
 
         void reset_fences() const;
 
         void submit_cmd_buffer() const;
 
-        VkResult present_image(const VkSemaphore* signal_semaphores, const uint32_t image_index) const;
+        VkResult present_image(const VkSemaphore* signal_semaphores, uint32_t image_index) const;
 
         void go_to_next_frame();
 
         void copy_buffer(
             const VkBuffer& source,
             const VkBuffer& destination,
-            const VkDeviceSize size) const;
+            VkDeviceSize size) const;
         // 禁用拷贝
         core(const core&) = delete;
         core& operator=(const core&) = delete;

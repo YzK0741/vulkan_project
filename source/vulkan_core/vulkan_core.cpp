@@ -1598,7 +1598,7 @@ namespace vulkan_core {
         );
 
         if (vkAllocateMemory(device, &allocInfo, nullptr, &imageMemory) != VK_SUCCESS) {
-            std::println("无法分配MSAA图像内存!");
+            std::println(stderr, "无法分配MSAA图像内存!");
             print_stacktrace_and_terminate();
         }
 

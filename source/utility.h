@@ -95,12 +95,11 @@ concept handler_type = std::integral<T> &&
 
 template <typename derived, handler_type Ht = long, Ht lowest = 1000, Ht biggest = INT32_MAX>
 class enable_handler_distribute {
-protected:
+private:
     std::vector<Ht> recycled_handlers;
     Ht handler_up_bound = lowest - 1;
     mutable std::mutex distribute_mutex;
 
-private:
     bool is_valid_handler_no_lock(const Ht& handler) const noexcept  {
         if (handler <= this->handler_up_bound &&
             lowest <= handler &&

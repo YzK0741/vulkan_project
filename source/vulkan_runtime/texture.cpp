@@ -35,8 +35,6 @@ VkSampler create_sampler(const VkDevice& device) {
 }
 
 
-
-
 namespace vulkan_runtime {
     vulkan_texture runtime::create_texture(const stb_texture &texture) {
 
