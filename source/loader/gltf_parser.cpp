@@ -8,7 +8,10 @@
 #include  <vulkan/vulkan.h>
 #include "../utility.h"
 #include "gltf_parser.h"
-// 改进的辅助函数：从 accessor 读取数据（考虑类型大小和步长）
+
+#include <filesystem>
+#include <ranges>
+
 template<typename T>
 std::vector<T> get_accessor_data(const tinygltf::Model& model, int accessor_index) {
     const auto& accessor = model.accessors[accessor_index];
@@ -209,10 +212,16 @@ std::vector<gltf_data> process_gltf_model(const tinygltf::Model& model) {
 }
 
 std::vector<gltf_data> load_gltf(const std::string_view path) {
+    std::filesystem::path filepath;
+
+    if (!std::filesystem::exists(path)) {
+        std::println("file {} does not exist", path);
+    }
+
     tinygltf::Model model;
     tinygltf::TinyGLTF loader;
     std::string err, warn;
-    bool success = {false};
+    bool success = false;
     if (path.ends_with("glb")) {
         success = loader.LoadBinaryFromFile(&model, &err, &warn, path.data());
     } else if (path.ends_with("gltf")) {
@@ -223,12 +232,12 @@ std::vector<gltf_data> load_gltf(const std::string_view path) {
         print_stacktrace_and_terminate();
     }
     if (!warn.empty())
-        std::println("{}", warn);
+        std::println(stderr, "gltf loading warn: {}", warn);
     if (!err.empty())
-        std::println("{}", err);
+        std::println(stderr, "gltf loading error: {}", err);
 
     if (!success){
-        std::println("failed load model");
+        std::println(stderr, "failed load model");
         print_stacktrace_and_terminate();
     }
 
@@ -239,4 +248,149 @@ std::vector<gltf_data> load_gltf(const std::string_view path) {
 
 std::future<std::vector<gltf_data>> load_gltf_async(std::string_view path) {
     return std::async(std::launch::async, load_gltf, path);
+}
+
+void print_mesh_info(const tinygltf::Model& model) {
+    int mesh_data_index = 0;
+    for (const auto& mesh : model.meshes) {
+        std::println("mesh {}: name={}", mesh_data_index,
+                     mesh.name.empty() ? "(unnamed)" : mesh.name);
+
+        for (size_t pi = 0; pi < mesh.primitives.size(); ++pi) {
+            const auto& primitive = mesh.primitives[pi];
+            std::println("  primitive {}:", pi);
+
+            // Attributes
+            std::println("    attributes:");
+            for (const auto& name : primitive.attributes | std::views::keys) {
+                const auto& accessor = model.accessors[primitive.attributes.at(name)];
+                std::println("      - {}: {} elements", name, accessor.count);
+            }
+
+            // Indices
+            if (primitive.indices >= 0) {
+                const auto& indices = model.accessors[primitive.indices];
+                std::println("    indices: {} elements", indices.count);
+            }
+
+            // Material
+            if (primitive.material >= 0) {
+                const auto& mat = model.materials[primitive.material];
+                std::println("    material: {}",
+                             mat.name.empty() ? "(unnamed)" : mat.name);
+            }
+
+            // Mode
+            std::string mode_str;
+            switch (primitive.mode) {
+                case TINYGLTF_MODE_TRIANGLES: mode_str = "triangles"; break;
+                case TINYGLTF_MODE_TRIANGLE_STRIP: mode_str = "triangle strip"; break;
+                case TINYGLTF_MODE_POINTS: mode_str = "points"; break;
+                case TINYGLTF_MODE_LINE_LOOP: mode_str = "line loop"; break;
+                case TINYGLTF_MODE_LINE_STRIP: mode_str = "line strip"; break;
+                default: mode_str = "unknown";
+            }
+            std::println("    mode: {}", mode_str);
+        }
+        ++mesh_data_index;
+    }
+}
+
+void print_texture_info(const tinygltf::Model& model) {
+    if (model.textures.empty()) {
+        std::println("No textures in model");
+        return;
+    }
+
+    std::println("\n======== Texture Details ({} total):", model.textures.size());
+    for (size_t i = 0; i < model.textures.size(); ++i) {
+        const auto& tex = model.textures[i];
+        std::println("\n  Texture [{}]:", i);
+        std::println("    name: {}", tex.name.empty() ? "(unnamed)" : tex.name);
+
+        // Image source
+        if (tex.source >= 0 && tex.source < static_cast<int>(model.images.size())) {
+            const auto& img = model.images[tex.source];
+            std::println("    image: {} ({} x {}, {} bits, {} channels)",
+                         img.name.empty() ? "(unnamed)" : img.name,
+                         img.width, img.height,
+                         img.bits, img.component);
+            if (!img.uri.empty()) {
+                std::println("      uri: {}", img.uri);
+            }
+            if (!img.mimeType.empty()) {
+                std::println("      mimeType: {}", img.mimeType);
+            }
+            // 可选：打印图像数据大小
+            if (!img.image.empty()) {
+                std::println("      data size: {} bytes", img.image.size());
+            }
+        } else {
+            std::println("    image: (none or invalid)");
+        }
+
+        // Sampler
+        if (tex.sampler >= 0 && tex.sampler < static_cast<int>(model.samplers.size())) {
+            const auto& sampler = model.samplers[tex.sampler];
+            std::println("    sampler:");
+            std::println("      magFilter: {} ({})",
+                         sampler.magFilter,
+                         sampler.magFilter == TINYGLTF_TEXTURE_FILTER_NEAREST ? "nearest" : "linear");
+            std::println("      minFilter: {} ({})",
+                         sampler.minFilter,
+                         sampler.minFilter == TINYGLTF_TEXTURE_FILTER_NEAREST ? "nearest" : "linear");
+            std::println("      wrapS: {} ({})",
+                         sampler.wrapS,
+                         sampler.wrapS == TINYGLTF_TEXTURE_WRAP_REPEAT ? "repeat" :
+                         (sampler.wrapS == TINYGLTF_TEXTURE_WRAP_MIRRORED_REPEAT ? "mirrored_repeat" : "clamp"));
+            std::println("      wrapT: {} ({})",
+                         sampler.wrapT,
+                         sampler.wrapT == TINYGLTF_TEXTURE_WRAP_REPEAT ? "repeat" :
+                         (sampler.wrapT == TINYGLTF_TEXTURE_WRAP_MIRRORED_REPEAT ? "mirrored_repeat" : "clamp"));
+        }
+    }
+}
+
+void print_model_info(const std::string_view path) {
+
+    if (!std::filesystem::exists(path)) {
+        std::println(stderr, "file {} does not exist", path);
+        print_stacktrace_and_terminate();  // 或 return
+    }
+
+    tinygltf::Model model;
+    tinygltf::TinyGLTF loader;
+    std::string err, warn;
+    bool success = false;
+
+    std::string ext = std::filesystem::path(path).extension().string();
+    std::ranges::transform(ext, ext.begin(), ::tolower);
+
+    if (ext == ".glb") {
+        success = loader.LoadBinaryFromFile(&model, &err, &warn, path.data());
+    } else if (ext == ".gltf") {
+        success = loader.LoadASCIIFromFile(&model, &err, &warn, path.data());
+    } else {
+        std::println(stderr, "wrong name! file does not end with '.glb' or '.gltf'");
+        print_stacktrace_and_terminate();
+    }
+
+    if (!warn.empty()) std::println(stderr, "gltf loading warn: {}", warn);
+    if (!err.empty()) std::println(stderr, "gltf loading error: {}", err);
+    if (!success) {
+        std::println(stderr, "failed load model");
+        print_stacktrace_and_terminate();
+    }
+
+
+
+    std::println("========/ model {} data:", path);
+
+    std::println("======== Model Metadata:");
+    std::println("version: {}", model.asset.version);
+    std::println("generator: {}", model.asset.generator);
+    std::println("copyright: {}", model.asset.copyright);
+
+    print_mesh_info(model);
+    print_texture_info(model);
 }

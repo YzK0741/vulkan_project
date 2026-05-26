@@ -16,6 +16,8 @@ struct gltf_data {
     VkFormat texture_format;
 };
 
+void print_model_info(std::string_view path);
+
 std::vector<gltf_data> load_gltf(std::string_view path);
 
 std::future<std::vector<gltf_data>> load_gltf_async(std::string_view path);
