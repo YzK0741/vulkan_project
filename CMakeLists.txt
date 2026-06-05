@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD 23)
 find_package(Vulkan REQUIRED)
 find_package(glfw3 REQUIRED)
 find_package(glm REQUIRED)
+find_package(mimalloc REQUIRED)
 
 add_executable(vulkan_project main.cpp
         source/vulkan_core/vulkan_core.h
@@ -34,11 +35,14 @@ add_executable(vulkan_project main.cpp
         source/vulkan_runtime/texture.cpp
         source/vulkan_runtime/create_info.cpp
         source/vulkan_runtime/create_info.h
+        source/shaders/shaders.cpp
+        source/shaders/shaders.h
 )
 
 target_link_libraries(${PROJECT_NAME}
         Vulkan::Vulkan
         glfw
+        mimalloc
 )
 
 target_compile_options(vulkan_project PRIVATE
@@ -49,6 +53,7 @@ target_compile_options(vulkan_project PRIVATE
         -ffunction-sections
         -fdata-sections
         -flto
+        -march=native
         -fno-unwind-tables      # 移除 unwind 表
         -fno-asynchronous-unwind-tables  # 移除异步 unwind
         -fmerge-all-constants  # 合并常量

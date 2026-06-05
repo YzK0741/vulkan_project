@@ -9,6 +9,7 @@
 #include <barrier>
 #include <expected>
 #include <thread>
+#include <span>
 #include "create_info.h"
 #include "../vulkan_core/vulkan_core.h"
 #include "../vulkan_core/vulkan_utility.h"

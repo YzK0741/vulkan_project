@@ -3,6 +3,7 @@
 //
 
 #include <expected>
+#include "../shaders/shaders.h"
 #include "../vulkan_core/vulkan_core.h"
 #include "vulkan_runtime.h"
 
@@ -203,8 +204,8 @@ namespace vulkan_runtime {
             // 读取并创建着色器模块
             VkShaderModule vert_shader_module = VK_NULL_HANDLE;
             VkShaderModule frag_shader_module = VK_NULL_HANDLE;
-            auto vert_shader_code = read_file("vert.spv");
-            auto frag_shader_code = read_file("frag.spv");
+            auto vert_shader_code = shaders::get_basic_vertex_shader_byte();
+            auto frag_shader_code = shaders::get_basic_fragment_shader_byte();
 
             if (vert_shader_code.empty() || frag_shader_code.empty()) {
                 std::println("着色器文件为空");

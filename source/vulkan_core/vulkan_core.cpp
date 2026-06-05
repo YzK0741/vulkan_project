@@ -359,7 +359,7 @@ namespace vulkan_core {
     }
 
     // 读取文件函数（用于读取着色器文件）
-    std::vector<char> read_file(const std::string& filename) {
+    std::vector<unsigned char> read_file(const std::string &filename) {
         std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
         if (!file.is_open()) {
@@ -368,17 +368,16 @@ namespace vulkan_core {
         }
 
         const auto fileSize = file.tellg();
-        std::vector<char> buffer(fileSize);
+        std::vector<unsigned char> buffer(fileSize);
 
         file.seekg(0);
-        file.read(buffer.data(), fileSize);
+        file.read(reinterpret_cast<std::istream::char_type *>(buffer.data()), fileSize);
         file.close();
 
         return buffer;
     }
 
-    // 创建着色器模块
-    VkShaderModule create_shader_module(const std::vector<char>& code, const VkDevice& device) {
+    VkShaderModule create_shader_module(const std::span<const unsigned char> code, const VkDevice& device)  {
         VkShaderModuleCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
         createInfo.codeSize = code.size();

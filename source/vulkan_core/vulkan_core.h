@@ -13,6 +13,7 @@
 #include <GLFW/glfw3native.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
+#include <span>
 #include <fstream>
 #include <vector>
 
@@ -85,8 +86,8 @@ namespace vulkan_core {
     swap_chain_support_details query_swap_chain_support(const VkPhysicalDevice& device, const VkSurfaceKHR& surface);
     VkSurfaceFormatKHR choose_swap_surface_format(const std::vector<VkSurfaceFormatKHR>& available_formats);
 
-    std::vector<char> read_file(const std::string& filename);
-    VkShaderModule create_shader_module(const std::vector<char>& code, const VkDevice& device);
+    std::vector<unsigned char> read_file(const std::string &filename);
+    VkShaderModule create_shader_module(const std::span<const unsigned char> code, const VkDevice& device);
     VkFormat find_depth_format(const VkPhysicalDevice &physical_device);
     VkImageView create_image_view(const VkImage& image, const VkFormat& format, const VkImageAspectFlags& aspectFlags, const VkDevice& device);
     VkSampleCountFlagBits get_max_usable_sample_count(const VkPhysicalDevice& physical_device);
