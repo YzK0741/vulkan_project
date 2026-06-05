@@ -177,9 +177,14 @@ namespace vulkan_core {
 
         void create_descriptor_set_layout();
 
-        VkDescriptorSetLayout descriptor_set_layout_pbr = VK_NULL_HANDLE;
+        std::array<VkDescriptorSetLayout, 2> descriptor_set_layout_pbr = {VK_NULL_HANDLE, VK_NULL_HANDLE};
 
         void create_pbr_descriptor_set_layout();
+
+        VkPipelineLayout pbr_pipeline_layout = {};
+        dtor_type* pbr_pipeline_cleanup_cleanup = nullptr;
+
+        void create_pbr_pipeline_layout();
 
         VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
 

@@ -10,6 +10,7 @@
 #include <expected>
 #include <thread>
 #include <span>
+#include <chrono>
 #include "create_info.h"
 #include "../vulkan_core/vulkan_core.h"
 #include "../vulkan_core/vulkan_utility.h"
@@ -490,6 +491,8 @@ namespace vulkan_runtime {
         // 管线相关
         VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
         VkPipeline graphics_pipeline = VK_NULL_HANDLE;
+        VkPipelineLayout pbr_pipeline_layout = VK_NULL_HANDLE;
+        VkPipeline pbr_graphics_pipeline = VK_NULL_HANDLE;
 
         // Uniform Buffer相关
         std::vector<VkBuffer> uniform_buffers;
@@ -508,14 +511,20 @@ namespace vulkan_runtime {
         void create_pipeline_layout();
 
         // 为特定网格创建管线
-        [[nodiscard]] VkPipeline create_pipeline();
+        void create_pipeline();
+        void create_pbr_pipeline();
 
         std::optional<std::jthread> render_thread;
         std::condition_variable cv;
         std::mutex render_lock;
         bool pause_render_thread = false;
 
+        std::atomic_int frames_in_second = {0};
+        std::atomic_int current_frames = {0};
+        std::chrono::steady_clock::time_point last_whole_second = std::chrono::steady_clock::now();
+
         std::expected<void, std::string_view> restore_rendering_no_lock();
+
 
     public:
         runtime();
@@ -553,6 +562,8 @@ namespace vulkan_runtime {
         std::expected<void, std::string_view> restore_rendering();
 
         std::unique_lock<std::mutex> wait_frame();
+
+        int get_frame_speed() const;
 
         // 获取窗口
         [[nodiscard]] GLFWwindow* get_window() const { return core.window; }

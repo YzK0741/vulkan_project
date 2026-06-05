@@ -54,7 +54,7 @@ struct vertex {
 
         // 位置属性 - location 0
         attribute_descriptions[0].binding = 0;
-        attribute_descriptions[0].location = 0;                       // 着色器中的 location
+        attribute_descriptions[0].location = 0; // 着色器中的 location
         attribute_descriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT; // vec3
         attribute_descriptions[0].offset = offsetof(vertex, position); // 偏移量
 
@@ -67,12 +67,13 @@ struct vertex {
         // 纹理坐标属性 - location 2
         attribute_descriptions[2].binding = 0;
         attribute_descriptions[2].location = 2;
-        attribute_descriptions[2].format = VK_FORMAT_R32G32_SFLOAT;    // vec2
+        attribute_descriptions[2].format = VK_FORMAT_R32G32_SFLOAT; // vec2
         attribute_descriptions[2].offset = offsetof(vertex, tex_coord);
 
         return attribute_descriptions;
     }
 };
+
 
 struct mesh_data {
     std::vector<vertex> vertices;
@@ -84,8 +85,6 @@ template <typename T>
 void hash_combine(std::size_t& seed, const T& val) {
     seed ^= std::hash<T>{}(val) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 }
-
-
 
 // 自定义哈希函数
 template<>

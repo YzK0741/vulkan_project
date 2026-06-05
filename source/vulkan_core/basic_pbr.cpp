@@ -6,7 +6,7 @@
 
 namespace basic_pbr {
 
-    VkDescriptorSetLayout create_set0_layout(VkDevice device) {
+    VkDescriptorSetLayout create_set0_layout(const VkDevice device) { // NOLINT(*-misplaced-const)
         std::array<VkDescriptorSetLayoutBinding, 2> bindings{};
 
         // binding 0: UBO (projection, view, model, camPos)
@@ -33,7 +33,7 @@ namespace basic_pbr {
         return layout;
     }
 
-    VkDescriptorSetLayout create_set1_layout(VkDevice device) {
+    VkDescriptorSetLayout create_set1_layout(const VkDevice device) { // NOLINT(*-misplaced-const)
         std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
 
         // binding 0: albedoMap

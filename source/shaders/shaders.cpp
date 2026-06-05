@@ -18,7 +18,7 @@ std::span<const unsigned char> shaders::get_basic_fragment_shader_byte() {
 
 #include "../../shaders/pbr_vertex_byte.h"
 
-std::span<const unsigned char> get_pbr_vertex_shader_byte() {
+std::span<const unsigned char> shaders::get_pbr_vertex_shader_byte() {
     return {reinterpret_cast<const unsigned char*>(pbr_vert_spv), pbr_vert_spv_len};
 }
 

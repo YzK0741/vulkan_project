@@ -6,7 +6,7 @@
 #include "../shaders/shaders.h"
 #include "../vulkan_core/vulkan_core.h"
 #include "vulkan_runtime.h"
-
+#include "../vulkan_core/basic_pbr.h"
 
 namespace vulkan_runtime {
     template<typename T>
@@ -83,15 +83,15 @@ namespace vulkan_runtime {
               vertex_buffer(core.device),
               index_buffer(core.device) {
         // 创建单一的全局管线
-        graphics_pipeline = create_pipeline();
-        create_pipeline_layout();
+        create_pipeline();
+        create_pbr_pipeline();
     }
 
     runtime::~runtime() {
         if (this->render_thread) {
-            std::println("render thread is not destroyed until runtime start destroying");
+            std::println(stderr, "render thread is not destroyed until runtime start destroying");
             if (auto result = this->stop_rendering(); !result && result.error() != "render thread did not create") {
-                std::println("error occurred while stopping render thread");
+                std::println(stderr, "error occurred while stopping render thread");
                 print_stacktrace_and_terminate();
             }
         }
@@ -99,9 +99,6 @@ namespace vulkan_runtime {
         // 清理管线
         if (graphics_pipeline != VK_NULL_HANDLE) {
             vkDestroyPipeline(core.device, graphics_pipeline, nullptr);
-        }
-        if (pipeline_layout != VK_NULL_HANDLE) {
-            vkDestroyPipelineLayout(core.device, pipeline_layout, nullptr);
         }
 
         cleanup_texture_resources();
@@ -122,9 +119,16 @@ namespace vulkan_runtime {
                 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
                 uniform_buffers[i],
                 uniform_buffers_memory[i]
-            );
+                );
 
-            vkMapMemory(core.device, uniform_buffers_memory[i], 0, buffer_size, 0, &uniform_buffers_mapped[i]);
+            vkMapMemory(
+                core.device,
+                this->uniform_buffers_memory[i],
+                0,
+                buffer_size,
+                0,
+                &this->uniform_buffers_mapped[i]
+                );
         }
     }
 
@@ -167,7 +171,7 @@ namespace vulkan_runtime {
         }
     }
 
-    VkPipeline runtime::create_pipeline() {
+    void runtime::create_pipeline() {
             // 1. 验证核心对象
             if (core.device == VK_NULL_HANDLE) {
                 std::println("Vulkan device is not initialized");
@@ -326,8 +330,170 @@ namespace vulkan_runtime {
             vkDestroyShaderModule(core.device, vert_shader_module, nullptr);
             vkDestroyShaderModule(core.device, frag_shader_module, nullptr);
 
-            return pipeline;
+            this->graphics_pipeline = pipeline;
         }
+
+    void runtime::create_pbr_pipeline() {
+        // 1. 验证核心对象
+        if (core.device == VK_NULL_HANDLE) {
+            std::println("Vulkan device is not initialized");
+            print_stacktrace_and_terminate();
+        }
+
+        if (core.swap_chain_extent.width == 0 || core.swap_chain_extent.height == 0) {
+            std::println("Swap chain extent is not initialized");
+            print_stacktrace_and_terminate();
+        }
+
+        if (core.renderpass == VK_NULL_HANDLE) {
+            std::println("Render pass is not initialized");
+            print_stacktrace_and_terminate();
+        }
+
+        this->pbr_pipeline_layout = this->core.pbr_pipeline_layout;
+        if (pbr_pipeline_layout == VK_NULL_HANDLE) {
+            std::println("pbr pipeline layout is not initialized");
+            print_stacktrace_and_terminate();
+        }
+
+        // 使用全局的顶点输入描述（与vertex结构匹配）
+        auto binding_description = basic_pbr::get_binding_descriptions();
+        auto attribute_descriptions = basic_pbr::get_attribute_descriptions();
+
+        VkPipelineVertexInputStateCreateInfo vertex_input_info{};
+        vertex_input_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        vertex_input_info.vertexBindingDescriptionCount = static_cast<uint32_t>(binding_description.size());
+        vertex_input_info.pVertexBindingDescriptions = binding_description.data();
+        vertex_input_info.vertexAttributeDescriptionCount = static_cast<uint32_t>(attribute_descriptions.size());
+        vertex_input_info.pVertexAttributeDescriptions = attribute_descriptions.data();
+
+        // 读取并创建着色器模块
+        VkShaderModule vert_shader_module = VK_NULL_HANDLE;
+        VkShaderModule frag_shader_module = VK_NULL_HANDLE;
+        auto vert_shader_code = shaders::get_pbr_vertex_shader_byte();
+        auto frag_shader_code = shaders::get_pbr_fragment_shader_byte();
+
+        if (vert_shader_code.empty() || frag_shader_code.empty()) {
+            std::println("着色器文件为空");
+            print_stacktrace_and_terminate();
+        }
+
+        vert_shader_module = create_shader_module(vert_shader_code, core.device);
+        frag_shader_module = create_shader_module(frag_shader_code, core.device);
+
+        VkPipelineShaderStageCreateInfo vert_shader_stage_info{};
+        vert_shader_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        vert_shader_stage_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
+        vert_shader_stage_info.module = vert_shader_module;
+        vert_shader_stage_info.pName = "main";
+
+        VkPipelineShaderStageCreateInfo frag_shader_stage_info{};
+        frag_shader_stage_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        frag_shader_stage_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        frag_shader_stage_info.module = frag_shader_module;
+        frag_shader_stage_info.pName = "main";
+
+        VkPipelineShaderStageCreateInfo shader_stages[] = {vert_shader_stage_info, frag_shader_stage_info};
+
+            // 输入装配状态
+            VkPipelineInputAssemblyStateCreateInfo input_assembly{};
+            input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+            input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+            input_assembly.primitiveRestartEnable = VK_FALSE;
+
+            // 视口和裁剪
+            VkViewport viewport{};
+            viewport.x = 0.0f;
+            viewport.y = 0.0f;
+            viewport.width = static_cast<float>(core.swap_chain_extent.width);
+            viewport.height = static_cast<float>(core.swap_chain_extent.height);
+            viewport.minDepth = 0.0f;
+            viewport.maxDepth = 1.0f;
+
+            VkRect2D scissor{};
+            scissor.offset = {0, 0};
+            scissor.extent = core.swap_chain_extent;
+
+            VkPipelineViewportStateCreateInfo viewport_state{};
+            viewport_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+            viewport_state.viewportCount = 1;
+            viewport_state.pViewports = &viewport;
+            viewport_state.scissorCount = 1;
+            viewport_state.pScissors = &scissor;
+
+            // 光栅化状态
+            VkPipelineRasterizationStateCreateInfo rasterizer{};
+            rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+            rasterizer.depthClampEnable = VK_FALSE;
+            rasterizer.rasterizerDiscardEnable = VK_FALSE;
+            rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+            rasterizer.lineWidth = 1.0f;
+            rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+            rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+            rasterizer.depthBiasEnable = VK_FALSE;
+
+            // 多重采样状态
+            VkPipelineMultisampleStateCreateInfo multisampling{};
+            multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+            multisampling.sampleShadingEnable = VK_FALSE;
+            multisampling.rasterizationSamples = core.msaa_samples;
+            multisampling.minSampleShading = 1.0f;
+            multisampling.pSampleMask = nullptr;
+            multisampling.alphaToCoverageEnable = VK_FALSE;
+            multisampling.alphaToOneEnable = VK_FALSE;
+
+            // 颜色混合状态
+            VkPipelineColorBlendAttachmentState color_blend_attachment{};
+            color_blend_attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+                VK_COLOR_COMPONENT_G_BIT |
+                    VK_COLOR_COMPONENT_B_BIT |
+                        VK_COLOR_COMPONENT_A_BIT;
+            color_blend_attachment.blendEnable = VK_FALSE;
+
+            VkPipelineColorBlendStateCreateInfo color_blending{};
+            color_blending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+            color_blending.logicOpEnable = VK_FALSE;
+            color_blending.attachmentCount = 1;
+            color_blending.pAttachments = &color_blend_attachment;
+
+            // 深度测试
+            VkPipelineDepthStencilStateCreateInfo depth_stencil{};
+            depth_stencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+            depth_stencil.depthTestEnable = VK_TRUE;
+            depth_stencil.depthWriteEnable = VK_TRUE;
+            depth_stencil.depthCompareOp = VK_COMPARE_OP_LESS;
+            depth_stencil.depthBoundsTestEnable = VK_FALSE;
+            depth_stencil.stencilTestEnable = VK_FALSE;
+
+            // 创建管线
+            VkGraphicsPipelineCreateInfo pipeline_info = {};
+            pipeline_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+            pipeline_info.stageCount = 2;
+            pipeline_info.pStages = shader_stages;
+            pipeline_info.pVertexInputState = &vertex_input_info;
+            pipeline_info.pInputAssemblyState = &input_assembly;
+            pipeline_info.pViewportState = &viewport_state;
+            pipeline_info.pRasterizationState = &rasterizer;
+            pipeline_info.pMultisampleState = &multisampling;
+            pipeline_info.pColorBlendState = &color_blending;
+            pipeline_info.pDepthStencilState = &depth_stencil;
+            pipeline_info.layout = pbr_pipeline_layout;
+            pipeline_info.renderPass = core.renderpass;
+            pipeline_info.subpass = 0;
+            pipeline_info.basePipelineHandle = VK_NULL_HANDLE;
+
+        VkPipeline pipeline = VK_NULL_HANDLE;
+        if (vkCreateGraphicsPipelines(core.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &pipeline) != VK_SUCCESS) {
+            std::println("failed to create graphics pipeline!");
+            print_stacktrace_and_terminate();
+        }
+
+        // 清理着色器模块
+        vkDestroyShaderModule(core.device, vert_shader_module, nullptr);
+        vkDestroyShaderModule(core.device, frag_shader_module, nullptr);
+
+        this->pbr_graphics_pipeline = pipeline;
+    }
 
     vulkan_renderable_object &runtime::add_object(
         const std::vector<vertex> &vertices,
@@ -506,6 +672,18 @@ namespace vulkan_runtime {
 
         // 8. 前进到下一帧
         core.go_to_next_frame();
+
+        this->current_frames.fetch_add(1, std::memory_order_release);
+        if (const auto now = std::chrono::steady_clock::now();
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - this->last_whole_second).count() >= 1000
+            ) {
+            this->last_whole_second = now;
+            this->frames_in_second.store(this->current_frames.exchange(0, std::memory_order_release), std::memory_order_release);
+        }
+    }
+
+    int runtime::get_frame_speed() const {
+        return this->frames_in_second.load(std::memory_order_acquire);
     }
 
     void runtime::update_uniform_buffer(const uint32_t current_image) const {

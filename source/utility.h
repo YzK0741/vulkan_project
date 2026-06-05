@@ -71,7 +71,7 @@ protected:
 
     void do_cleanup() noexcept {
 
-        if (static_cast<derived*>(this)->entry_stack_callback)
+        if (this->entry_stack_callback)
             (*this->entry_stack_callback)();
 
         while (!dtor_stack.empty()) {
@@ -79,7 +79,7 @@ protected:
             dtor_stack.pop();
         }
 
-        if (static_cast<derived*>(this)->end_stack_callback)
+        if (this->end_stack_callback)
            (*this->end_stack_callback)();
     }
 };

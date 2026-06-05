@@ -5,6 +5,7 @@
 #include <set>
 #include <limits>
 #include <algorithm>
+#include "basic_pbr.h"
 #include "vulkan_core.h"
 
 #include <boost/core/demangle.hpp>
@@ -518,6 +519,8 @@ namespace vulkan_core {
             std::println("帧缓冲区创建完成");
 
             this->create_graphics_pipeline_layout();
+            this->create_pbr_descriptor_set_layout();
+            this->create_pbr_pipeline_layout();
 
             this->create_command_pool();
             std::println("命令池创建完成");
@@ -1224,8 +1227,6 @@ namespace vulkan_core {
     void core::create_graphics_pipeline_layout() {
             if (pipeline_cleanup_cleanup)
                 (*pipeline_cleanup_cleanup)();
-
-            // 3. 顶点输入状态（使用新的Vertex结构）
             auto binding_description = vertex::get_binding_descriptions();
             auto attribute_descriptions = vertex::get_attribute_descriptions();
 
@@ -1366,59 +1367,127 @@ namespace vulkan_core {
     }
 
     void core::create_pbr_descriptor_set_layout() {
-            std::array<VkDescriptorSetLayoutBinding, 6> bindings = {};  // 增加到6个
+        this->descriptor_set_layout_pbr[0] = basic_pbr::create_set0_layout(this->device);
+        this->descriptor_set_layout_pbr[1] = basic_pbr::create_set1_layout(this->device);
 
-            // binding 0: Uniform Buffer
-            bindings[0].binding = 0;
-            bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            bindings[0].descriptorCount = 1;
-            bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        register_cleanup([this] {
+            vkDestroyDescriptorSetLayout(device, descriptor_set_layout_pbr[0], nullptr);
+            vkDestroyDescriptorSetLayout(device, descriptor_set_layout_pbr[1], nullptr);
+        });
+    }
 
-            // binding 1: Base Color
-            bindings[1].binding = 1;
-            bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            bindings[1].descriptorCount = 1;
-            bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    void core::create_pbr_pipeline_layout() {
+        if (pbr_pipeline_cleanup_cleanup)
+            (*pbr_pipeline_cleanup_cleanup)();
 
-            // binding 2: Metallic/Roughness
-            bindings[2].binding = 2;
-            bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            bindings[2].descriptorCount = 1;
-            bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        VkPushConstantRange push_constant_range{};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = sizeof(basic_pbr::MaterialPC);  // 32 bytes
 
-            // binding 3: Normal
-            bindings[3].binding = 3;
-            bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            bindings[3].descriptorCount = 1;
-            bindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        auto binding_description = basic_pbr::get_binding_descriptions();
+        auto attribute_descriptions = basic_pbr::get_attribute_descriptions();
 
-            // binding 4: Occlusion
-            bindings[4].binding = 4;
-            bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            bindings[4].descriptorCount = 1;
-            bindings[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        VkPipelineVertexInputStateCreateInfo vertex_input_info{};
+        vertex_input_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        vertex_input_info.vertexBindingDescriptionCount = static_cast<uint32_t>(binding_description.size());
+        vertex_input_info.pVertexBindingDescriptions = binding_description.data();
+        vertex_input_info.vertexAttributeDescriptionCount = static_cast<uint32_t>(attribute_descriptions.size());
+        vertex_input_info.pVertexAttributeDescriptions = attribute_descriptions.data();
 
-            // binding 5: Emissive
-            bindings[5].binding = 5;
-            bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            bindings[5].descriptorCount = 1;
-            bindings[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+            // 4. 输入装配状态
+            VkPipelineInputAssemblyStateCreateInfo input_assembly{};
+            input_assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+            input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+            input_assembly.primitiveRestartEnable = VK_FALSE;
 
-            // 创建描述符集布局
-            VkDescriptorSetLayoutCreateInfo layout_info{};
-            layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-            layout_info.bindingCount = bindings.size();
-            layout_info.pBindings = bindings.data();
+            VkRect2D scissor{};
+            scissor.offset = {0, 0};
+            scissor.extent = swap_chain_extent;
 
-            if (vkCreateDescriptorSetLayout(device, &layout_info, nullptr, &descriptor_set_layout_pbr) != VK_SUCCESS) {
-                std::println(stderr, "PBR描述符集布局创建失败");
+            // 6. 光栅化状态
+            VkPipelineRasterizationStateCreateInfo rasterizer{};
+            rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+            rasterizer.depthClampEnable = VK_FALSE;
+            rasterizer.rasterizerDiscardEnable = VK_FALSE;
+            rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+            rasterizer.lineWidth = 1.0f;
+            rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+            rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;  // 改为逆时针，通常更适合标准模型
+            rasterizer.depthBiasEnable = VK_FALSE;
+            rasterizer.depthBiasConstantFactor = 0.0f;
+            rasterizer.depthBiasClamp = 0.0f;
+            rasterizer.depthBiasSlopeFactor = 0.0f;
+
+            // 7. 多重采样状态
+            VkPipelineMultisampleStateCreateInfo multisampling{};
+            multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+            multisampling.sampleShadingEnable = VK_FALSE;  // 可以启用样本着色
+            multisampling.rasterizationSamples = msaa_samples;  // 使用MSAA采样数
+            multisampling.minSampleShading = 1.0f;  // 可以调整为小于1.0以启用样本着色
+            multisampling.pSampleMask = nullptr;
+            multisampling.alphaToCoverageEnable = VK_FALSE;
+            multisampling.alphaToOneEnable = VK_FALSE;
+
+            // 8. 颜色混合状态（每个帧缓冲区）
+            VkPipelineColorBlendAttachmentState color_blend_attachment{};
+            color_blend_attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT |
+                VK_COLOR_COMPONENT_G_BIT |
+                    VK_COLOR_COMPONENT_B_BIT |
+                        VK_COLOR_COMPONENT_A_BIT;
+            color_blend_attachment.blendEnable = VK_FALSE;
+            color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            color_blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+            color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
+            color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+            color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+
+            VkPipelineColorBlendStateCreateInfo color_blending{};
+            color_blending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+            color_blending.logicOpEnable = VK_FALSE;
+            color_blending.logicOp = VK_LOGIC_OP_COPY;
+            color_blending.attachmentCount = 1;
+            color_blending.pAttachments = &color_blend_attachment;
+            color_blending.blendConstants[0] = 0.0f;
+            color_blending.blendConstants[1] = 0.0f;
+            color_blending.blendConstants[2] = 0.0f;
+            color_blending.blendConstants[3] = 0.0f;
+
+            // 9. 动态状态（可动态修改的部分）
+            std::vector<VkDynamicState> dynamic_states = {
+                VK_DYNAMIC_STATE_VIEWPORT,
+                VK_DYNAMIC_STATE_SCISSOR
+            };
+
+            VkPipelineDynamicStateCreateInfo dynamic_state = {};
+            dynamic_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+            dynamic_state.dynamicStateCount = static_cast<uint32_t>(dynamic_states.size());
+            dynamic_state.pDynamicStates = dynamic_states.data();
+
+            // 10. 管线布局（着色器 uniform 和 push 常量）
+            VkPipelineLayoutCreateInfo pipeline_layout_info = {};
+            pipeline_layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+            pipeline_layout_info.setLayoutCount = 2;
+            pipeline_layout_info.pSetLayouts = this->descriptor_set_layout_pbr.data();
+            pipeline_layout_info.pushConstantRangeCount = 1;
+            pipeline_layout_info.pPushConstantRanges = &push_constant_range;
+
+            if (vkCreatePipelineLayout(this->device, &pipeline_layout_info, nullptr, &this->pbr_pipeline_layout) != VK_SUCCESS) {
+                std::println("failed to create pipeline layout!");
                 print_stacktrace_and_terminate();
             }
 
-            register_cleanup([this] {
-                vkDestroyDescriptorSetLayout(device, descriptor_set_layout_pbr, nullptr);
-            });
-        }
+
+            if (!pbr_pipeline_cleanup_cleanup) {
+                register_cleanup([this] {
+                    if (pbr_pipeline_layout != VK_NULL_HANDLE) {
+                        vkDestroyPipelineLayout(device, pbr_pipeline_layout, nullptr);
+                    }
+                });
+                pbr_pipeline_cleanup_cleanup = &dtor_stack.top();
+            }
+    }
 
     void core::create_descriptor_pool() {
         std::vector<VkDescriptorPoolSize> pool_sizes;
