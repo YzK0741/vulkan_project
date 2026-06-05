@@ -13,29 +13,25 @@ layout(location = 3) out mat3 outTBN;
 layout(set = 0, binding = 0) uniform UBO {
     mat4 projection;
     mat4 view;
+    mat4 model;
     vec3 camPos;
 } ubo;
-
-layout(push_constant) uniform PushConsts {
-    mat4 model;
-} pushConsts;
-
 void main() {
     // 传递 UV 坐标
     outUV = inUV;
 
     // 计算世界坐标位置
-    vec4 worldPos = pushConsts.model * vec4(inPos, 1.0);
+    vec4 worldPos = ubo.model * vec4(inPos, 1.0);
     outWorldPos = worldPos.xyz;
 
     // 转换法线到世界空间
     // 使用逆转置矩阵来正确变换法线（处理非均匀缩放）
     // 由于我们假设 model 矩阵是均匀缩放的，可以直接使用 model 矩阵
-    vec4 worldNormal = pushConsts.model * vec4(inNormal, 0.0);
+    vec4 worldNormal = ubo.model * vec4(inNormal, 0.0);
     outNormal = normalize(worldNormal.xyz);
 
     // 构建 TBN 矩阵
-    vec3 T = normalize((pushConsts.model * vec4(inTangent, 0.0)).xyz);
+    vec3 T = normalize((ubo.model * vec4(inTangent, 0.0)).xyz);
     vec3 N = normalize(outNormal);
     // 重新计算副法线以确保正交性
     vec3 B = normalize(cross(N, T));

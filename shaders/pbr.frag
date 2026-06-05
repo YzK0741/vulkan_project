@@ -10,6 +10,7 @@ layout(location = 0) out vec4 outColor;
 layout(set = 0, binding = 0) uniform UBO {
     mat4 projection;
     mat4 view;
+    mat4 model;
     vec3 camPos;
 } ubo;
 
