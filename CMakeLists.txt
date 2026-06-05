@@ -37,6 +37,8 @@ add_executable(vulkan_project main.cpp
         source/vulkan_runtime/create_info.h
         source/shaders/shaders.cpp
         source/shaders/shaders.h
+        source/vulkan_core/basic_pbr.cpp
+        source/vulkan_core/basic_pbr.h
 )
 
 target_link_libraries(${PROJECT_NAME}
