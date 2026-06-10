@@ -237,7 +237,7 @@ void VMA::do_upload_to_buffer(
     const VkDeviceSize size,
     const VkDeviceSize src_offset,
     const VkDeviceSize dst_offset
-) {
+) const {
 
 
     void* mapped_data = nullptr;
@@ -247,6 +247,7 @@ void VMA::do_upload_to_buffer(
 
     VkCommandBufferBeginInfo begin_info = {};
     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     vkBeginCommandBuffer(command_buffer, &begin_info);
 
     VkBufferCopy copy = {};
@@ -276,4 +277,26 @@ VkFence VMA::create_fence() const {
     vkCreateFence(this->device, &fence_create_info, nullptr, &fence);
 
     return fence;
+}
+
+uint32_t VMA::get_offset(VmaAllocation allocation) const {
+    std::lock_guard guard(this->mutex);
+    VmaAllocationInfo allocation_info;
+    vmaGetAllocationInfo(this->allocator, allocation, &allocation_info);
+    return allocation_info.offset;
+}
+
+VmaAllocationInfo VMA::get_info(const VmaAllocation &allocation) const {
+    std::lock_guard guard(this->mutex);
+    VmaAllocationInfo allocation_info = {};
+    vmaGetAllocationInfo(this->allocator, allocation, &allocation_info);
+    return allocation_info;
+}
+
+VmaAllocationInfo VMA::get_info(const handler buffer_handler) {
+    std::lock_guard guard(this->mutex);
+    const auto allocation = this->buffers[buffer_handler].allocation;
+    VmaAllocationInfo allocation_info = {};
+    vmaGetAllocationInfo(this->allocator, allocation, &allocation_info);
+    return allocation_info;
 }

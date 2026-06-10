@@ -107,7 +107,17 @@ namespace vulkan_runtime {
         };
     }
 
-    vulkan_texture runtime::create_texture(const std::vector<unsigned char> &texture, const int width, const int height, const VkFormat format) {
+    basic_pbr::renderable_texture runtime::create_texture(const std::vector<unsigned char> &texture, const uint32_t width,
+                                                          const uint32_t height, const VkFormat format) {
+
+        if (texture.empty()) {
+            std::println("ERROR: Texture data is empty!");
+            print_stacktrace_and_terminate();
+        }
+
+        std::println("Creating texture: {}x{}, format={}, data size={}",
+            width, height, static_cast<int>(format), texture.size());
+
 
         VkBufferCreateInfo buffer_create_info{};
         buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -145,6 +155,7 @@ namespace vulkan_runtime {
         const auto image_handler = this->core.vma.create_image(image_info);
 
         const auto&[image, image_allocation] = this->core.vma.get_image(image_handler); // NOLINT(*-misplaced-const
+        auto alloc_info = this->core.vma.get_info(image_allocation);
 
         waiter.wait();
 
@@ -159,14 +170,15 @@ namespace vulkan_runtime {
         );
 
         copy_buffer_to_image(
-                core.device,
-                core.command_pool,
-                core.graphics_queue,
-                buffer,
-                image,
-                static_cast<uint32_t>(width),
-                static_cast<uint32_t>(height)
-                );
+            core.device,
+            core.command_pool,
+            core.graphics_queue,
+            buffer,
+            image,
+            static_cast<uint32_t>(width),
+            static_cast<uint32_t>(height), 0
+        );
+
 
         transition_image_layout(
                 core.device,
@@ -189,13 +201,27 @@ namespace vulkan_runtime {
 
         VkDeviceMemory image_memory = this->core.vma.get_device_memory(image_allocation);
 
+        VmaAllocationInfo allocation_info = this->core.vma.get_info(allocation);
+
+        // 创建后验证
+        if (image_view == VK_NULL_HANDLE) {
+            std::println("ERROR: Failed to create image view!");
+        }
+        if (sampler == VK_NULL_HANDLE) {
+            std::println("ERROR: Failed to create sampler!");
+        }
+
         return {
+            image_handler,
+            buffer,
             image,
-            image_memory,
-            image_view,
+            allocation_info.offset,
             sampler,
-            static_cast<uint32_t>(width),
-            static_cast<uint32_t>(height)
+            image_view,
+            image_memory,
+            allocation_info.size,
+            width,
+            height
         };
     }
 }

@@ -75,7 +75,7 @@ struct vertex {
 };
 
 
-struct mesh_data {
+struct pbr_gltf_data {
     std::vector<vertex> vertices;
     std::vector<uint32_t> indices;
     int materialIndex = -1;

@@ -521,6 +521,7 @@ namespace vulkan_core {
             this->create_graphics_pipeline_layout();
             this->create_pbr_descriptor_set_layout();
             this->create_pbr_pipeline_layout();
+            std::println("pbr 资源设置完成");
 
             this->create_command_pool();
             std::println("命令池创建完成");
@@ -1491,7 +1492,7 @@ namespace vulkan_core {
 
     void core::create_descriptor_pool() {
         std::vector<VkDescriptorPoolSize> pool_sizes;
-        constexpr int max_size = 1024;
+        constexpr int max_size = 8192;
         pool_sizes.push_back({
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, max_size
         });

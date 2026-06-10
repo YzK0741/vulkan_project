@@ -16,6 +16,7 @@
 #include "../vulkan_core/vulkan_utility.h"
 #include "../loader/png_loader.h"
 #include "../vulkan_core/vulkan_buffer.h"
+#include "../vulkan_core/basic_pbr.h"
 
 namespace vulkan_runtime {
 
@@ -476,6 +477,7 @@ namespace vulkan_runtime {
     class runtime {
         core core;
         std::vector<vulkan_renderable_object> objects;
+        std::vector<basic_pbr::pbr_object> pbr_objects;
         vertex_buffer_creator creator;
         buffer_resource vertex_buffer;
         buffer_resource index_buffer;
@@ -525,7 +527,7 @@ namespace vulkan_runtime {
 
         std::expected<void, std::string_view> restore_rendering_no_lock();
 
-
+        basic_pbr::renderable_texture make_texture(std::span<const unsigned char> texture_data, uint32_t width, uint32_t height, VkFormat format);
     public:
         runtime();
 
@@ -550,6 +552,8 @@ namespace vulkan_runtime {
             int height = 0,
             VkFormat format = VK_FORMAT_UNDEFINED
             );
+
+        void add_pbr_object(std::span<basic_pbr::vertex> vertices, std::span<uint32_t> indices, std::map<std::string, texture>& textures);
 
         void render_frame();
 
@@ -602,6 +606,8 @@ namespace vulkan_runtime {
 
         // 创建描述符集
         void create_descriptor_sets();
+
+        VkDescriptorSet create_descriptor_set(VkDescriptorSetLayout layout) const;
 
         [[nodiscard]] VkDescriptorSet make_descriptor_sets(const VkBuffer& uniform_buffer) const;
 
@@ -660,7 +666,7 @@ namespace vulkan_runtime {
                 staging_buffer,
                 texture_image,
                 static_cast<uint32_t>(texture.width),
-                static_cast<uint32_t>(texture.height)
+                static_cast<uint32_t>(texture.height), 0
             );
 
             transition_image_layout(
@@ -691,7 +697,8 @@ namespace vulkan_runtime {
 
         vulkan_texture create_texture(const stb_texture &texture);
 
-        vulkan_texture create_texture(const std::vector<unsigned char> &texture, int width, int height, VkFormat format);
+        basic_pbr::renderable_texture create_texture(const std::vector<unsigned char> &texture, uint32_t width, uint32_t height,
+                                                     VkFormat format);
 
         // 创建默认纹理（用于测试）
         static stb_texture create_default_texture();
@@ -866,12 +873,13 @@ namespace vulkan_runtime {
             VkBuffer buffer,
             VkImage image,
             uint32_t width,
-            uint32_t height
+            uint32_t height,
+            uint32_t buffer_offset
         ) {
             VkCommandBuffer command_buffer = begin_single_time_commands(device, command_pool);
 
             VkBufferImageCopy region{};
-            region.bufferOffset = 0;
+            region.bufferOffset = buffer_offset;
             region.bufferRowLength = 0;
             region.bufferImageHeight = 0;
 

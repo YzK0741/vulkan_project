@@ -109,9 +109,12 @@ private:
         return false;
     }
 
-protected:
+public:
 
     using handler = Ht;
+
+protected:
+
 
     enable_handler_distribute() {
         static_assert(lowest > std::numeric_limits<Ht>::min());

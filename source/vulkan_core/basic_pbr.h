@@ -6,6 +6,8 @@
 #define VULKAN_PROJECT_BASE_PBR_H
 
 #include <glm/glm.hpp>
+#include <map>
+#include <string_view>
 #include <vulkan/vulkan.h>
 
 namespace basic_pbr {
@@ -60,6 +62,7 @@ namespace basic_pbr {
         glm::mat4 view;
         glm::mat4 model;
         glm::vec3 camPos;
+        uint8_t padding[2];
     };
 
     struct Light {
@@ -80,12 +83,54 @@ namespace basic_pbr {
         glm::vec4 baseColorFactor;  // 16 bytes
         float metallicFactor;       // 4 bytes
         float roughnessFactor;      // 4 bytes
-        float padding[2];           // 8 bytes to align to 32?
+        float padding[2];           // 8 bytes to align to 32
     };
 
     VkDescriptorSetLayout create_set0_layout(VkDevice device);
     VkDescriptorSetLayout create_set1_layout(VkDevice device);
 
+    struct renderable_texture {
+        long image_handler;
+        VkBuffer image_buffer;
+        VkImage image;
+        VkDeviceSize offset;
+        VkSampler sampler;
+        VkImageView image_view;
+        VkDeviceMemory device_memory;
+        VkDeviceSize size;
+        uint32_t width, height;
+    };
+
+    struct pbr_object {
+        VkBuffer vertex_buffer = VK_NULL_HANDLE;
+        VkDeviceSize vertex_buffer_offset;
+        VkBuffer index_buffer = VK_NULL_HANDLE;
+        VkDeviceSize index_buffer_offset;
+        uint32_t index_count;
+        std::map<std::string_view, renderable_texture> textures;
+        UBO ubo;
+        VkBuffer ubo_buffer = VK_NULL_HANDLE;
+        uint32_t ubo_offset;
+        LightUBO light_ubo;
+        VkBuffer light_ubo_buffer = VK_NULL_HANDLE;
+        uint32_t light_ubo_offset;
+        MaterialPC material_pc;
+        VkDescriptorSet set0;
+        VkDescriptorSet set1;
+
+        void draw(VkCommandBuffer cmd, VkPipelineLayout pipeline_layout) const;
+        void bind_set0(VkDevice device) const;
+        void bind_set1(VkDevice device);
+    };
+
+
+
 } // base_pbr
+
+struct texture {
+    std::vector<unsigned char> data;
+    int width, height;
+    VkFormat format;
+};
 
 #endif //VULKAN_PROJECT_BASE_PBR_H

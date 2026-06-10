@@ -24,7 +24,7 @@ class VMA : enable_handler_distribute<VMA> {
     VkQueue queue = VK_NULL_HANDLE;
     VkCommandPool command_pool = VK_NULL_HANDLE;
     VmaAllocator allocator = VK_NULL_HANDLE;
-    std::mutex mutex;
+    mutable std::mutex mutex;
     std::unordered_map<handler,vma_buffer> buffers;
     std::unordered_map<handler,vma_image> images;
 
@@ -36,7 +36,7 @@ class VMA : enable_handler_distribute<VMA> {
                              VkDeviceSize size,
                              VkDeviceSize src_offset,
                              VkDeviceSize dst_offset
-                             );
+                             ) const;
 
     [[nodiscard]] VkFence create_fence() const;
 
@@ -71,6 +71,12 @@ public:
     );
 
     [[nodiscard]] VkDeviceMemory get_device_memory(const VmaAllocation &allocation) const;
+
+    uint32_t get_offset(VmaAllocation allocation) const;
+
+    VmaAllocationInfo get_info(const VmaAllocation &allocation) const;
+
+    VmaAllocationInfo get_info(const handler buffer_handler);
 };
 
 

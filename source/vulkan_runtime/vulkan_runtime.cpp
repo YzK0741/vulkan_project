@@ -520,7 +520,13 @@ namespace vulkan_runtime {
             const stb_texture stb_texture1 = create_default_texture();
             texture = this->create_texture(stb_texture1);
         } else {
-            texture = create_texture(texture_data, width, height, format);
+            auto pbr_texture = create_texture(texture_data, width, height, format);
+            texture.width = pbr_texture.width;
+            texture.height = pbr_texture.height;
+            texture.texture_image = pbr_texture.image;
+            texture.texture_image_memory = pbr_texture.device_memory;
+            texture.texture_image_view = pbr_texture.image_view;
+            texture.texture_sampler = pbr_texture.sampler;
         }
 
         create_uniform_buffers();
@@ -606,6 +612,156 @@ namespace vulkan_runtime {
 
 
         return this->add_object(positions, normals, tex_coords, indexes, "");
+    }
+
+    void runtime::add_pbr_object(std::span<basic_pbr::vertex> vertices, std::span<uint32_t> indices, std::map<std::string, texture>& textures) {
+
+        std::println("First vertex UV: ({}, {})", vertices[0].uv.x, vertices[0].uv.y);
+
+        std::println("First vertex tangent: ({}, {}, {})",
+    vertices[0].tangent.x, vertices[0].tangent.y, vertices[0].tangent.z);
+
+        basic_pbr::pbr_object object;
+
+        // 模型矩阵：单位矩阵，放在原点
+        object.ubo.model = glm::mat4(1.0f);
+        // 如果模型太大或太小，调整缩放
+        object.ubo.model = glm::scale(object.ubo.model, glm::vec3(3.0f));  // 先保持原大小
+
+        // 视图矩阵：相机放在斜前方，看向原点
+        object.ubo.view = glm::lookAt(
+            glm::vec3(5.0f, 5.0f, 5.0f),   // 相机位置 (x,y,z)
+            glm::vec3(0.0f, 0.0f, 0.0f),   // 看向原点
+            glm::vec3(0.0f, 1.0f, 0.0f)    // 上方向是Y轴
+        );
+
+        // 投影矩阵：透视投影
+        object.ubo.projection = glm::perspective(
+            glm::radians(45.0f),            // 视野角度
+            16.0f / 9.0f,                   // 宽高比（假设16:9）
+            0.1f,                           // 近平面
+            100.0f                          // 远平面
+        );
+
+        object.ubo.camPos = glm::vec3(5.0f, 5.0f, 5.0f);
+
+        // ========== 设置灯光数据 ==========
+        object.light_ubo.numLights = 1;
+        object.light_ubo.lights[0] = {
+            glm::vec3(10.0f, 10.0f, 10.0f),  // 灯光在斜上方
+            glm::vec3(1.0f, 1.0f, 1.0f),      // 白色光
+            5.0f                               // 强度提高到5
+        };
+
+        // ========== 设置材质参数 ==========
+        object.material_pc = {
+            glm::vec4(1.0f, 1.0f, 1.0f, 1.0f),  // baseColorFactor (白色)
+            1.0f,                                 // metallicFactor (金属度)
+            0.5f,                                 // roughnessFactor (粗糙度)
+            {0.0f, 0.0f}                          // padding
+        };
+
+        // 创建顶点缓冲区
+        VkBufferCreateInfo vertex_buffer_create_info = {};
+        vertex_buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        vertex_buffer_create_info.size = vertices.size() * sizeof(basic_pbr::vertex);
+        vertex_buffer_create_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        auto vertex_buffer_handler = this->core.vma.create_buffer(vertex_buffer_create_info);
+        auto vertex_waiter = this->core.vma.update_to_buffer(vertices.data(), vertex_buffer_handler, vertices.size() * sizeof(basic_pbr::vertex), 0);
+
+        // 创建索引缓冲区
+        VkBufferCreateInfo index_buffer_create_info = {};
+        index_buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        index_buffer_create_info.size = indices.size() * sizeof(uint32_t);
+        index_buffer_create_info.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+        auto index_buffer_handler = this->core.vma.create_buffer(index_buffer_create_info);
+        auto index_waiter = this->core.vma.update_to_buffer(indices.data(), index_buffer_handler, indices.size() * sizeof(uint32_t), 0);
+
+        // 等待缓冲区数据上传完成
+        vertex_waiter.wait();
+        index_waiter.wait();
+
+        // 获取缓冲区信息
+        auto [vertex_buffer_, vertex_allocation] = this->core.vma.get_buffer(vertex_buffer_handler);
+        auto vertex_info = this->core.vma.get_info(vertex_allocation);
+        object.vertex_buffer = vertex_buffer_;
+        object.vertex_buffer_offset = vertex_info.offset;
+
+        auto [index_buffer_, index_allocation] = this->core.vma.get_buffer(index_buffer_handler);
+        auto index_info = this->core.vma.get_info(index_allocation);
+        object.index_buffer = index_buffer_;
+        object.index_buffer_offset = index_info.offset;
+        object.index_count = static_cast<uint32_t>(indices.size());
+
+        // 创建 UBO 缓冲区
+        VkBufferCreateInfo ubo_buffer_create_info = {};
+        ubo_buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        ubo_buffer_create_info.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        ubo_buffer_create_info.size = sizeof(basic_pbr::UBO);
+        auto ubo_handler = this->core.vma.create_buffer(ubo_buffer_create_info);
+        auto ubo_waiter = this->core.vma.update_to_buffer(&object.ubo, ubo_handler, sizeof(basic_pbr::UBO), 0);
+
+        // 创建 Light UBO 缓冲区
+        VkBufferCreateInfo light_ubo_buffer_create_info = {};
+        light_ubo_buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        light_ubo_buffer_create_info.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        light_ubo_buffer_create_info.size = sizeof(basic_pbr::LightUBO);
+        auto light_ubo_handler = this->core.vma.create_buffer(light_ubo_buffer_create_info);
+        auto light_ubo_waiter = this->core.vma.update_to_buffer(&object.light_ubo, light_ubo_handler, sizeof(basic_pbr::LightUBO), 0);
+
+        // ✅ 等待 UBO 数据上传完成
+        ubo_waiter.wait();
+        light_ubo_waiter.wait();
+
+        // 获取 UBO 缓冲区信息
+        const auto [ubo_buffer, ubo_allocation] = this->core.vma.get_buffer(ubo_handler);
+        object.ubo_buffer = ubo_buffer;
+        object.ubo_offset = this->core.vma.get_offset(ubo_allocation);
+
+        const auto [light_ubo_buffer, light_ubo_allocation] = this->core.vma.get_buffer(light_ubo_handler);
+        object.light_ubo_buffer = light_ubo_buffer;
+        object.light_ubo_offset = this->core.vma.get_offset(light_ubo_allocation);
+
+        // ✅ 创建 descriptor set layout（需要保持持久化，不能立即销毁）
+        auto set0_layout = this->core.descriptor_set_layout_pbr[0];;
+        auto set1_layout = this->core.descriptor_set_layout_pbr[1];;
+
+        // 分配 descriptor sets
+        VkDescriptorSetAllocateInfo set0_allocate_info = {};
+        set0_allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        set0_allocate_info.descriptorPool = this->core.descriptor_pool;
+        set0_allocate_info.descriptorSetCount = 1;
+        set0_allocate_info.pSetLayouts = &set0_layout;
+
+        VkResult result = vkAllocateDescriptorSets(this->core.device, &set0_allocate_info, &object.set0);
+        if (result != VK_SUCCESS) {
+            std::println(stderr, "Failed to allocate set0: {}", static_cast<int>(result));
+            print_stacktrace_and_terminate();
+        }
+
+        VkDescriptorSetAllocateInfo set1_allocate_info = {};
+        set1_allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        set1_allocate_info.descriptorPool = this->core.descriptor_pool;
+        set1_allocate_info.descriptorSetCount = 1;
+        set1_allocate_info.pSetLayouts = &set1_layout;
+
+        result = vkAllocateDescriptorSets(this->core.device, &set1_allocate_info, &object.set1);
+        if (result != VK_SUCCESS) {
+            std::println(stderr, "Failed to allocate set1: {}", static_cast<int>(result));
+            print_stacktrace_and_terminate();
+        }
+
+        // ✅ 创建纹理资源
+        for (const auto& [name, tex] : textures) {
+            object.textures[name] = this->create_texture(tex.data, tex.width, tex.height, tex.format);
+        }
+
+        // ✅ 绑定 descriptor sets（必须在 layout 销毁之前）
+        object.bind_set0(this->core.device);
+        object.bind_set1(this->core.device);
+
+
+        pbr_objects.push_back(std::move(object));
     }
 
     void runtime::render_frame() {
@@ -768,6 +924,19 @@ namespace vulkan_runtime {
         if (vkAllocateDescriptorSets(core.device, &alloc_info, &descriptor_set) != VK_SUCCESS) {
             std::println(stderr,"无法分配描述符集!");
         }
+    }
+
+    VkDescriptorSet runtime::create_descriptor_set(const VkDescriptorSetLayout layout) const {
+        VkDescriptorSetAllocateInfo alloc_info = {};
+        alloc_info.descriptorPool = core.descriptor_pool;
+        alloc_info.descriptorSetCount = 1;
+        alloc_info.pSetLayouts = &layout;
+
+        VkDescriptorSet set;
+        if (vkAllocateDescriptorSets(core.device, &alloc_info, &set) != VK_SUCCESS) {
+            std::println(stderr,"无法分配描述符集!");
+        }
+        return set;
     }
 
     VkDescriptorSet runtime::make_descriptor_sets(const VkBuffer &uniform_buffer) const  {
@@ -1105,6 +1274,18 @@ namespace vulkan_runtime {
                 }
             }
 
+            // 2. 绑定管线 - 使用全局管线
+            vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pbr_graphics_pipeline);
+
+
+            vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
+
+            vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
+
+            for (const auto& object : this->pbr_objects) {
+                object.draw(cmd_buffer, this->pbr_pipeline_layout);
+            }
+
 
             vkCmdEndRenderPass(cmd_buffer);
 
@@ -1172,7 +1353,7 @@ namespace vulkan_runtime {
                 staging_buffer,
                 texture_image,
                 static_cast<uint32_t>(width),
-                static_cast<uint32_t>(height)
+                static_cast<uint32_t>(height), 0
             );
 
             // 5. 转换纹理图像到着色器可读状态
@@ -1309,5 +1490,103 @@ namespace vulkan_runtime {
 
     std::unique_lock<std::mutex> runtime::wait_frame() {
         return std::unique_lock(this->render_lock);
+    }
+
+    basic_pbr::renderable_texture runtime::make_texture(const std::span<const unsigned char> texture_data, const uint32_t width, const uint32_t height, const VkFormat format) {
+        VkBufferCreateInfo buffer_create_info = {};
+        buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        buffer_create_info.size = texture_data.size();
+        buffer_create_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        const auto buffer_handler = this->core.vma.create_buffer(buffer_create_info);
+        auto waiter = this->core.vma.update_to_buffer(texture_data.data(), buffer_handler, texture_data.size(), 0);
+
+        VkImageCreateInfo image_create_info= {};
+        image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        image_create_info.extent = {width, height, 1};
+        image_create_info.format = format;
+        image_create_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        const auto image_handler = this->core.vma.create_image(image_create_info);
+        const auto& [image, image_alloc] = this->core.vma.get_image(image_handler);
+
+        transition_image_layout(
+            this->core.device,
+            this->core.command_pool,
+            this->core.graphics_queue,
+            image,
+            format,
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+        );
+
+        waiter.wait();
+
+        auto& [buffer, buffer_alloc] = this->core.vma.get_buffer(buffer_handler);
+        const auto offset = this->core.vma.get_offset(buffer_alloc);
+        copy_buffer_to_image(
+            core.device,
+            core.command_pool,
+            core.graphics_queue,
+            buffer,
+            image,
+            static_cast<uint32_t>(width),
+            static_cast<uint32_t>(height), offset
+        );
+
+        transition_image_layout(
+                core.device,
+                core.command_pool,
+                core.graphics_queue,
+                image,
+                format,  // 根据实际格式调整
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            );
+
+        const VkImageView& image_view = create_image_view(
+                this->core.device,
+                image,
+                format,
+                VK_IMAGE_ASPECT_COLOR_BIT
+                );
+
+        VkSampler sampler;
+
+        VkSamplerCreateInfo sampler_info{};
+        sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        sampler_info.magFilter = VK_FILTER_LINEAR;
+        sampler_info.minFilter = VK_FILTER_LINEAR;
+        sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_info.anisotropyEnable = VK_TRUE;
+        sampler_info.maxAnisotropy = 16;
+        sampler_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        sampler_info.unnormalizedCoordinates = VK_FALSE;
+        sampler_info.compareEnable = VK_FALSE;
+        sampler_info.compareOp = VK_COMPARE_OP_ALWAYS;
+        sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        sampler_info.mipLodBias = 0.0f;
+        sampler_info.minLod = 0.0f;
+        sampler_info.maxLod = 0.0f;
+
+        if (vkCreateSampler(core.device, &sampler_info, nullptr, &sampler) != VK_SUCCESS) {
+            std::println("无法创建纹理采样器!");
+            print_stacktrace_and_terminate();
+        }
+
+        const auto info = this->core.vma.get_info(image_alloc);
+
+        return {
+            image_handler,
+            buffer,
+            image,
+            info.offset,
+            sampler,
+            image_view,
+            info.deviceMemory,
+            info.size,
+            width,
+            height
+        };
     }
 }

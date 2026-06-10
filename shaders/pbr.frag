@@ -159,7 +159,6 @@ void main()
                            worldNormal, V, L,
                            light.color, light.intensity * attenuation);
     }
-
     // 环境光照 (简化的 IBL)
     vec3 ambient = albedo.rgb * 0.03 * ao;
 

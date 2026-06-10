@@ -352,7 +352,6 @@ void print_texture_info(const tinygltf::Model& model) {
 }
 
 void print_model_info(const std::string_view path) {
-
     if (!std::filesystem::exists(path)) {
         std::println(stderr, "file {} does not exist", path);
         print_stacktrace_and_terminate();  // 或 return
@@ -393,4 +392,285 @@ void print_model_info(const std::string_view path) {
 
     print_mesh_info(model);
     print_texture_info(model);
+}
+
+basic_pbr_gltf_data do_load_gltf_pbr(const tinygltf::Model& model , basic_pbr_gltf_data& pbr_gltf_data) {
+
+    const auto& primitive = model.meshes[0].primitives[0];
+    std::vector<glm::vec3> positions;
+    std::vector<glm::vec3> normals;
+    std::vector<glm::vec2> tex_coords;
+    std::vector<glm::vec4> tangents;
+
+    // 读取位置
+    if (primitive.attributes.contains("POSITION")) {
+        auto pos_data = get_accessor_data<float>(model, primitive.attributes.at("POSITION"));
+        for (size_t i = 0; i < pos_data.size(); i += 3) {
+            positions.emplace_back(pos_data[i], pos_data[i + 1], pos_data[i + 2]);
+        }
+    }
+
+    // 读取法线
+    if (primitive.attributes.contains("NORMAL")) {
+        auto normal_data = get_accessor_data<float>(model, primitive.attributes.at("NORMAL"));
+        for (size_t i = 0; i < normal_data.size(); i += 3) {
+            normals.emplace_back(normal_data[i], normal_data[i + 1], normal_data[i + 2]);
+        }
+    }
+
+    // 读取纹理坐标
+    if (primitive.attributes.contains("TEXCOORD_0")) {
+        auto tex_data = get_accessor_data<float>(model, primitive.attributes.at("TEXCOORD_0"));
+        for (size_t i = 0; i < tex_data.size(); i += 2) {
+            tex_coords.emplace_back(tex_data[i], tex_data[i + 1]);
+        }
+    }
+
+    if (primitive.attributes.contains("TANGENT")) {
+        auto tangent_data = get_accessor_data<float>(model, primitive.attributes.at("TANGENT"));
+        for (size_t i = 0; i < tangent_data.size(); i += 4) {
+            tangents.emplace_back(tangent_data[i], tangent_data[i + 1], tangent_data[i + 2], tangent_data[i + 3]);
+        }
+    }
+
+    // 3. 构建顶点数组
+    pbr_gltf_data.model.vertices.resize(positions.size());
+    for (size_t i = 0; i < positions.size(); ++i) {
+        pbr_gltf_data.model.vertices[i].position = positions[i];
+        pbr_gltf_data.model.vertices[i].normal = i < normals.size() ? normals[i] : glm::vec3(0.0f);
+        pbr_gltf_data.model.vertices[i].uv = i < tex_coords.size() ? tex_coords[i] : glm::vec2(0.0f);
+        pbr_gltf_data.model.vertices[i].tangent = i < tangents.size() ? xyz(tangents[i]) : glm::vec4(0.0f);
+    }
+    // 4. 处理索引（修复版本）
+    if (primitive.indices >= 0) {
+        const auto& index_accessor = model.accessors[primitive.indices];
+
+        // 检查 bufferView 是否有效
+        if (index_accessor.bufferView < 0) {
+            std::println(stderr, "警告: 索引 accessor 没有 bufferView");
+            // 如果没有索引buffer，生成顺序索引
+            pbr_gltf_data.model.indices.resize(pbr_gltf_data.model.vertices.size());
+            for (size_t i = 0; i < pbr_gltf_data.model.vertices.size(); ++i) {
+                pbr_gltf_data.model.indices[i] = static_cast<uint32_t>(i);
+            }
+
+        }
+
+        const auto& index_buffer_view = model.bufferViews[index_accessor.bufferView];
+        const auto& index_buffer = model.buffers[index_buffer_view.buffer];
+
+        // 计算数据指针
+        const uint8_t* index_ptr = index_buffer.data.data() +
+            index_buffer_view.byteOffset + index_accessor.byteOffset;
+
+        pbr_gltf_data.model.indices.resize(index_accessor.count);
+
+        // 根据索引类型读取（支持所有 glTF 标准索引类型）
+        switch (index_accessor.componentType) {
+            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: {
+                const auto* indices8 = reinterpret_cast<const uint8_t*>(index_ptr);
+                for (size_t i = 0; i < index_accessor.count; ++i) {
+                    pbr_gltf_data.model.indices[i] = indices8[i];
+                }
+                break;
+            }
+
+            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: {
+                const auto* indices16 = reinterpret_cast<const uint16_t*>(index_ptr);
+                for (size_t i = 0; i < index_accessor.count; ++i) {
+                    pbr_gltf_data.model.indices[i] = indices16[i];
+                }
+                break;
+            }
+
+            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT: {
+                const auto* indices32 = reinterpret_cast<const uint32_t*>(index_ptr);
+                for (size_t i = 0; i < index_accessor.count; ++i) {
+                    pbr_gltf_data.model.indices[i] = indices32[i];
+                }
+                break;
+            }
+
+            default: {
+                std::println(stderr, "警告: 不支持的索引类型: {}", index_accessor.componentType);
+                // 不支持的类型，生成顺序索引
+                pbr_gltf_data.model.indices.resize(pbr_gltf_data.model.vertices.size());
+                for (size_t i = 0; i < pbr_gltf_data.model.vertices.size(); ++i) {
+                    pbr_gltf_data.model.indices[i] = static_cast<uint32_t>(i);
+                }
+                break;
+            }
+        }
+    } else {
+        // 如果没有索引，生成顺序索引
+        pbr_gltf_data.model.indices.resize(pbr_gltf_data.model.vertices.size());
+        for (size_t i = 0; i < pbr_gltf_data.model.vertices.size(); ++i) {
+            pbr_gltf_data.model.indices[i] = static_cast<uint32_t>(i);
+        }
+        std::println("没有索引数据，使用顺序索引");
+    }
+
+    // 正确的纹理加载
+    for (size_t i = 0; i < model.textures.size(); ++i) {
+        if (const auto& texture = model.textures[i]; texture.source >= 0 && texture.source < static_cast<int>(model.images.size())) {
+            const auto& image = model.images[texture.source];
+
+            // 确定纹理类型（需要额外的材质信息）
+            std::string tex_name;
+
+            if (i == pbr_gltf_data.material.base_color_texture) {
+                tex_name = "ALBEDO";
+            } else if (i == pbr_gltf_data.material.emissive_texture) {
+                tex_name = "EMISSIVE";
+            } else if (i == pbr_gltf_data.material.metallic_roughness_texture) {
+                tex_name = "METALLIC_ROUGHNESS";
+            } else if (i == pbr_gltf_data.material.normal_texture) {
+                tex_name = "NORMAL";
+            } else if (i == pbr_gltf_data.material.occlusion_texture) {
+                tex_name = "AO";
+            } else {
+                tex_name = "texture_" + std::to_string(i);
+            }
+
+            if (!texture.name.empty()) {
+                tex_name = texture.name;
+            }
+
+            pbr_gltf_data.textures[tex_name] = {
+                image.image,
+                image.width,
+                image.height,  // 修正：应该是 height，不是 width
+                get_vk_format_from_image(image)
+            };
+        }
+    }
+    return pbr_gltf_data;
+}
+
+PBR_material load_pbr_material(const tinygltf::Model& model, const int material_index) {
+    PBR_material material;
+
+    if (material_index < 0 || material_index >= model.materials.size()) {
+        return material;
+    }
+
+    const auto& mat = model.materials[material_index];
+
+    // 1. 读取 PBR 金属粗糙度参数
+    if (mat.values.contains("baseColorFactor")) {
+        const auto& color = mat.values.at("baseColorFactor").ColorFactor();
+        material.base_color_factor = glm::vec4(color[0], color[1], color[2], color[3]);
+    }
+
+    if (mat.values.contains("metallicFactor")) {
+        material.metallic_factor = static_cast<float>(mat.values.at("metallicFactor").Factor());
+    }
+
+    if (mat.values.contains("roughnessFactor")) {
+        material.roughness_factor = static_cast<float>(mat.values.at("roughnessFactor").Factor());
+    }
+
+    // 2. 读取纹理（需要区分 values 和 additionalValues）
+    // baseColorTexture 在 values 中
+    if (mat.values.contains("baseColorTexture")) {
+        material.base_color_texture = mat.values.at("baseColorTexture").TextureIndex();
+    }
+
+    // metallicRoughnessTexture 也在 values 中
+    if (mat.values.contains("metallicRoughnessTexture")) {
+        material.metallic_roughness_texture = mat.values.at("metallicRoughnessTexture").TextureIndex();
+    }
+
+    // 3. 读取其他 PBR 参数（通常在 additionalValues 中）
+    // 法线贴图
+    if (mat.additionalValues.contains("normalTexture")) {
+        material.normal_texture = mat.additionalValues.at("normalTexture").TextureIndex();
+
+        // 法线强度（可选）
+        if (mat.additionalValues.at("normalTexture").has_number_value) {
+            // 某些实现中法线强度在 TextureInfo 的 scale 中
+            material.normal_scale = 1.0f;
+        }
+    }
+
+    // 遮挡贴图
+    if (mat.additionalValues.contains("occlusionTexture")) {
+        material.occlusion_texture = mat.additionalValues.at("occlusionTexture").TextureIndex();
+        // 遮挡强度
+        if (mat.additionalValues.contains("occlusionStrength")) {
+            material.occlusion_strength = static_cast<float>(mat.additionalValues.at("occlusionStrength").Factor());
+        }
+    }
+
+    // 自发光
+    if (mat.additionalValues.contains("emissiveFactor")) {
+        const auto& emissive = mat.additionalValues.at("emissiveFactor").ColorFactor();
+        material.emissive_factor = glm::vec3(emissive[0], emissive[1], emissive[2]);
+    }
+
+    if (mat.additionalValues.contains("emissiveTexture")) {
+        material.emissive_texture = mat.additionalValues.at("emissiveTexture").TextureIndex();
+    }
+
+    // 4. 双面渲染（可选）
+    if (mat.additionalValues.contains("doubleSided")) {
+        // material.double_sided = mat.additionalValues.at("doubleSided").bool_value;
+    }
+
+    // 5. Alpha 模式
+    if (mat.additionalValues.contains("alphaMode")) {
+        std::string alpha_mode = mat.additionalValues.at("alphaMode").string_value;
+        // "OPAQUE", "MASK", "BLEND"
+    }
+
+    if (mat.additionalValues.contains("alphaCutoff")) {
+        // float alpha_cutoff = static_cast<float>(mat.additionalValues.at("alphaCutoff").Factor());
+    }
+
+    return material;
+}
+
+
+basic_pbr_gltf_data load_gltf_pbr(std::string_view path) {
+    if (!std::filesystem::exists(path)) {
+        std::println(stderr, "file {} does not exist", path);
+        print_stacktrace_and_terminate();  // 或 return
+    }
+
+    tinygltf::Model model;
+    tinygltf::TinyGLTF loader;
+    std::string err, warn;
+    bool success = false;
+
+    std::string ext = std::filesystem::path(path).extension().string();
+    std::ranges::transform(ext, ext.begin(), ::tolower);
+
+    if (ext == ".glb") {
+        success = loader.LoadBinaryFromFile(&model, &err, &warn, path.data());
+    } else if (ext == ".gltf") {
+        success = loader.LoadASCIIFromFile(&model, &err, &warn, path.data());
+    } else {
+        std::println(stderr, "wrong name! file does not end with '.glb' or '.gltf'");
+        print_stacktrace_and_terminate();
+    }
+
+    if (!warn.empty()) std::println(stderr, "gltf loading warn: {}", warn);
+    if (!err.empty()) std::println(stderr, "gltf loading error: {}", err);
+    if (!success) {
+        std::println(stderr, "failed load model");
+        print_stacktrace_and_terminate();
+    }
+
+    basic_pbr_gltf_data data = {};
+
+    data.material = load_pbr_material(model, 0);
+
+    do_load_gltf_pbr(model, data);
+
+    return data;
+}
+
+
+std::future<basic_pbr_gltf_data> load_gltf_pbr_async(std::string_view path) {
+    return std::async(std::launch::async, load_gltf_pbr, path);
 }
