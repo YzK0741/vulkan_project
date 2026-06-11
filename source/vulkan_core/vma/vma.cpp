@@ -277,3 +277,289 @@ VkFence VMA::create_fence() const {
 
     return fence;
 }
+
+bool VMA::direct_upload(VkBuffer buffer, const VmaAllocation allocation, const void *data, const VkDeviceSize size) const {
+    void* mapped_data = nullptr;
+    if (const VkResult result = vmaMapMemory(this->allocator, allocation, &mapped_data); result != VK_SUCCESS) {
+        std::println("Failed to map memory: {}", static_cast<int>(result));
+        return false;
+    }
+
+    memcpy(mapped_data, data, size);
+
+    VmaAllocationInfo alloc_info;
+    vmaGetAllocationInfo(this->allocator, allocation, &alloc_info);
+    if ((alloc_info.memoryType & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) == 0) {
+        vmaFlushAllocation(this->allocator, allocation, 0, size);
+    }
+
+    vmaUnmapMemory(this->allocator, allocation);
+    return true;
+}
+
+
+bool VMA::staging_upload(const VkBuffer dst_buffer, const void *data, const VkDeviceSize size) {
+        // 创建 staging buffer
+        VkBufferCreateInfo staging_create_info = {};
+        staging_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        staging_create_info.size = size;
+        staging_create_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+        VmaAllocationCreateInfo staging_alloc_info = {};
+        staging_alloc_info.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+        staging_alloc_info.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                                   VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+        VkBuffer staging_buffer = VK_NULL_HANDLE;
+        VmaAllocation staging_allocation = VK_NULL_HANDLE;
+        VmaAllocationInfo staging_info = {};
+
+        const VkResult result = vmaCreateBuffer(
+            this->allocator,
+            &staging_create_info,
+            &staging_alloc_info,
+            &staging_buffer,
+            &staging_allocation,
+            &staging_info
+        );
+
+        if (result != VK_SUCCESS) {
+            std::println(stderr, "Failed to create staging buffer: {}", static_cast<int>(result));
+            return false;
+        }
+
+        // 拷贝数据
+        if (staging_info.pMappedData) {
+            memcpy(staging_info.pMappedData, data, size);
+            if ((staging_info.memoryType & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) == 0) {
+                vmaFlushAllocation(this->allocator, staging_allocation, 0, size);
+            }
+        } else {
+            vmaDestroyBuffer(this->allocator, staging_buffer, staging_allocation);
+            return false;
+        }
+
+        // 执行拷贝命令
+        const VkCommandBuffer command_buffer = create_command_buffer(this->device, this->command_pool);
+        VkFence fence = this->create_fence();
+
+        VkCommandBufferBeginInfo begin_info = {};
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(command_buffer, &begin_info);
+
+        VkBufferCopy copy_region = {};
+        copy_region.size = size;
+        vkCmdCopyBuffer(command_buffer, staging_buffer, dst_buffer, 1, &copy_region);
+
+        vkEndCommandBuffer(command_buffer);
+
+        VkSubmitInfo submit_info = {};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.commandBufferCount = 1;
+        submit_info.pCommandBuffers = &command_buffer;
+
+        {
+            std::lock_guard<std::mutex> lock(this->mutex);
+            vkQueueSubmit(this->queue, 1, &submit_info, fence);
+        }
+
+        vkWaitForFences(this->device, 1, &fence, VK_TRUE, UINT64_MAX);
+
+        // 清理
+        vkDestroyFence(this->device, fence, nullptr);
+        vkFreeCommandBuffers(this->device, this->command_pool, 1, &command_buffer);
+        vmaDestroyBuffer(this->allocator, staging_buffer, staging_allocation);
+
+        return true;
+}
+
+enable_handler_distribute<VMA>::handler VMA::create_empty_image(const image_info &info, const image_type type) {
+    if (auto result = this->distribute_handler(); result.has_value()) {
+        const auto handler_value = result.value();
+
+        const auto alloc_info = get_image_allocation_info_from_type(type);
+        auto image_create_info = get_image_create_info_from_type(type, info);
+
+        VmaAllocation allocation = VK_NULL_HANDLE;
+        VkImage image = VK_NULL_HANDLE;
+
+        VkResult vk_result = vmaCreateImage(
+            this->allocator,
+            &image_create_info,
+            &alloc_info,
+            &image,
+            &allocation,
+            nullptr
+        );
+
+        if (vk_result != VK_SUCCESS) {
+            std::println("Failed to create image: {}", static_cast<int>(vk_result));
+            if (auto expected = this->recycle_handler(handler_value); !expected) {
+                std::println(stderr, "vma handler distribute error: {}", expected.error());
+            }
+            return invalid_handler;
+        }
+
+        this->images.emplace(handler_value, vma_image{image, allocation});
+        return handler_value;
+
+    } else {
+        std::println("vma handler distribute error: {}", result.error());
+        return invalid_handler;
+    }
+}
+
+bool VMA::direct_image_upload(VkImage image, VmaAllocation allocation, const void *data, const VkDeviceSize size) const {
+    void* mapped_data = nullptr;
+    VkResult result = vmaMapMemory(this->allocator, allocation, &mapped_data);
+    if (result != VK_SUCCESS) {
+        std::println("Failed to map image memory: {}", static_cast<int>(result));
+        return false;
+    }
+
+    memcpy(mapped_data, data, size);
+
+    VmaAllocationInfo alloc_info;
+    vmaGetAllocationInfo(this->allocator, allocation, &alloc_info);
+    if ((alloc_info.memoryType & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) == 0) {
+        vmaFlushAllocation(this->allocator, allocation, 0, size);
+    }
+
+    vmaUnmapMemory(this->allocator, allocation);
+    return true;
+}
+
+bool VMA::staging_image_upload(VkImage dst_image, const void *data, VkDeviceSize size, const image_info &info) {
+
+    // 创建 staging buffer
+    VkBufferCreateInfo buffer_create_info = {};
+    buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_create_info.size = size;
+    buffer_create_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+    VmaAllocationCreateInfo alloc_info = {};
+    alloc_info.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+    alloc_info.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
+                           VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+    VkBuffer staging_buffer = VK_NULL_HANDLE;
+    VmaAllocation staging_allocation = VK_NULL_HANDLE;
+    VmaAllocationInfo staging_info = {};
+
+    VkResult result = vmaCreateBuffer(
+    this->allocator,
+    &buffer_create_info,
+    &alloc_info,
+    &staging_buffer,
+    &staging_allocation,
+    &staging_info
+    );
+
+    if (result != VK_SUCCESS) {
+        std::println("Failed to create staging buffer for image: {}", static_cast<int>(result));
+        return false;
+    }
+
+        // 拷贝数据
+    if (staging_info.pMappedData) {
+        memcpy(staging_info.pMappedData, data, size);
+        if ((staging_info.memoryType & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) == 0) {
+            vmaFlushAllocation(this->allocator, staging_allocation, 0, size);
+        }
+    } else {
+        vmaDestroyBuffer(this->allocator, staging_buffer, staging_allocation);
+        return false;
+    }
+
+    // 执行拷贝
+    VkCommandBuffer command_buffer = create_command_buffer(this->device, this->command_pool);
+    VkFence fence = this->create_fence();
+
+    VkCommandBufferBeginInfo begin_info = {};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(command_buffer, &begin_info);
+
+    // 准备图像布局
+    VkImageMemoryBarrier barrier = {};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = dst_image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.levelCount = info.mip_levels;
+    barrier.subresourceRange.layerCount = info.array_layers;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    vkCmdPipelineBarrier(
+    command_buffer,
+    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+    VK_PIPELINE_STAGE_TRANSFER_BIT,
+    0,
+    0, nullptr,
+    0, nullptr,
+    1, &barrier
+    );
+
+    // 拷贝 buffer 到 image
+    VkBufferImageCopy region = {};
+    region.bufferOffset = 0;
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = info.array_layers;
+    region.imageOffset = {0, 0, 0};
+    region.imageExtent = {info.width, info.height, 1};
+
+    vkCmdCopyBufferToImage(
+    command_buffer,
+    staging_buffer,
+    dst_image,
+    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    1,
+    &region
+    );
+
+    // 转换到 shader read 布局
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(
+    command_buffer,
+    VK_PIPELINE_STAGE_TRANSFER_BIT,
+    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+    0,
+    0, nullptr,
+    0, nullptr,
+    1, &barrier
+    );
+
+    vkEndCommandBuffer(command_buffer);
+
+    VkSubmitInfo submit_info = {};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &command_buffer;
+
+    {
+        std::lock_guard<std::mutex> lock(this->mutex);
+        vkQueueSubmit(this->queue, 1, &submit_info, fence);
+    }
+
+    vkWaitForFences(this->device, 1, &fence, VK_TRUE, UINT64_MAX);
+
+    // 清理
+    vkDestroyFence(this->device, fence, nullptr);
+    vkFreeCommandBuffers(this->device, this->command_pool, 1, &command_buffer);
+    vmaDestroyBuffer(this->allocator, staging_buffer, staging_allocation);
+
+    return true;
+}
