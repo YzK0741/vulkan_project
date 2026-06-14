@@ -546,6 +546,7 @@ namespace vulkan_runtime {
         ){
             vulkan_renderable_object object = {vulkan_mesh_buffer(this->core, positions, normals, tex_coords, indexes)};
 
+
             // 创建纹理资源
             vulkan_texture texture;
             if (path.empty()) {

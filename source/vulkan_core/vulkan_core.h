@@ -5,12 +5,9 @@
 #ifndef VULKAN_PROJECT_VULKAN_CORE_H
 #define VULKAN_PROJECT_VULKAN_CORE_H
 
-#define VK_USE_PLATFORM_WIN32_KHR
 #include <vulkan/vulkan.h>
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
-#define GLFW_EXPOSE_NATIVE_WIN32
-#include <GLFW/glfw3native.h>
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
 #include <span>
@@ -20,6 +17,7 @@
 #include "create_info.h"
 #include "vulkan_utility.h"
 #include "vma/vma.h"
+
 
 
 namespace vulkan_core {
@@ -87,7 +85,7 @@ namespace vulkan_core {
     VkSurfaceFormatKHR choose_swap_surface_format(const std::vector<VkSurfaceFormatKHR>& available_formats);
 
     std::vector<unsigned char> read_file(const std::string &filename);
-    VkShaderModule create_shader_module(const std::span<const unsigned char> code, const VkDevice& device);
+    VkShaderModule create_shader_module(std::span<const unsigned char> code, const VkDevice& device);
     VkFormat find_depth_format(const VkPhysicalDevice &physical_device);
     VkImageView create_image_view(const VkImage& image, const VkFormat& format, const VkImageAspectFlags& aspectFlags, const VkDevice& device);
     VkSampleCountFlagBits get_max_usable_sample_count(const VkPhysicalDevice& physical_device);

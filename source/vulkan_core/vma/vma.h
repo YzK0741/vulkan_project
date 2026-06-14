@@ -7,6 +7,7 @@
 
 #include <vma/vk_mem_alloc.h>
 #include <span>
+#include "../vk_format.h"
 #include "vma_waiter.h"
 #include "../../utility.h"
 
@@ -330,11 +331,10 @@ public:
             return invalid_handler;
         }
 
-        const VkDeviceSize image_size = info.width * info.height * sizeof(pixel_type);
-        if (pixels.size() * sizeof(pixel_type) < image_size) {
-            std::println("Insufficient pixel data: expected {} bytes, got {} bytes",
-                        image_size, pixels.size() * sizeof(pixel_type));
-            return invalid_handler;
+        const VkDeviceSize image_size = pixels.size_bytes();
+
+        if (const VkDeviceSize expected_size = info.height * info.width  * sizeof_vk_format(info.format); expected_size != image_size) {
+            std::println(stderr, "incorrect image size [{}], expected [{}]", image_size, expected_size);
         }
 
         if (auto result = this->distribute_handler(); result.has_value()) {
@@ -342,6 +342,12 @@ public:
 
             const auto alloc_info = get_image_allocation_info_from_type(type);
             auto image_create_info = get_image_create_info_from_type(type, info);
+            image_create_info.mipLevels = info.mip_levels;
+            image_create_info.extent.width = info.width;
+            image_create_info.extent.height = info.height;
+            image_create_info.extent.depth = 1;
+            image_create_info.arrayLayers = info.array_layers;
+
 
             VmaAllocation allocation = VK_NULL_HANDLE;
             VkImage image = VK_NULL_HANDLE;

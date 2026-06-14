@@ -3,12 +3,12 @@
 //
 #include <optional>
 #include <set>
+#include <unordered_set>
 #include <limits>
 #include <algorithm>
 #include "basic_pbr.h"
 #include "vulkan_core.h"
 
-#include <boost/core/demangle.hpp>
 
 
 namespace vulkan_core {
@@ -43,19 +43,13 @@ namespace vulkan_core {
         std::vector<VkLayerProperties> available_layers(layer_count);
         vkEnumerateInstanceLayerProperties(&layer_count, available_layers.data());
 
-        for (const char* layer_name : validation_layers) {
-            bool layer_found = false;
-            for (const auto& layer_properties : available_layers) {
-                if (strcmp(layer_name, layer_properties.layerName) == 0) {
-                    layer_found = true;
-                    break;
-                }
-            }
-            if (!layer_found) {
-                return false;
-            }
+        std::unordered_set<std::string> available_names;
+        for (const auto& layer : available_layers) {
+            available_names.insert(layer.layerName);
         }
-        return true;
+
+        return std::ranges::all_of(validation_layers,
+            [&](const char* name) { return available_names.contains(name); });
     }
 
     // 获取GLFW需要的扩展
@@ -625,7 +619,7 @@ namespace vulkan_core {
             app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
             app_info.pEngineName = "No Engine";
             app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-            app_info.apiVersion = VK_API_VERSION_1_0;
+            app_info.apiVersion = VK_API_VERSION_1_3;
 
             VkInstanceCreateInfo create_info{};
             create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;

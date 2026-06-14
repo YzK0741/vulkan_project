@@ -27,6 +27,7 @@ void VMA::init(
     vma_allocator_create_info.instance = instance;
     vma_allocator_create_info.device = vulkan_device;
     vma_allocator_create_info.physicalDevice = physical_device;
+    vma_allocator_create_info.flags = 0;
 
     vmaCreateAllocator(&vma_allocator_create_info, &this->allocator);
 
@@ -61,6 +62,7 @@ void VMA::destroy() const {
 }
 
 enable_handler_distribute<VMA>::handler VMA::create_buffer(const VkBufferCreateInfo &buffer_create_info) {
+    std::unique_lock lock(this->mutex);
 
     VmaAllocationCreateInfo allocation_create_info = {};
     allocation_create_info.usage = VMA_MEMORY_USAGE_AUTO;
@@ -431,8 +433,7 @@ bool VMA::direct_image_upload(VkImage image, VmaAllocation allocation, const voi
 }
 
 bool VMA::staging_image_upload(VkImage dst_image, const void *data, VkDeviceSize size, const image_info &info) {
-
-    // 创建 staging buffer
+    // 创建 staging buffer（保持不变）
     VkBufferCreateInfo buffer_create_info = {};
     buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     buffer_create_info.size = size;
@@ -441,19 +442,19 @@ bool VMA::staging_image_upload(VkImage dst_image, const void *data, VkDeviceSize
     VmaAllocationCreateInfo alloc_info = {};
     alloc_info.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
     alloc_info.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
-                           VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+                       VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 
     VkBuffer staging_buffer = VK_NULL_HANDLE;
     VmaAllocation staging_allocation = VK_NULL_HANDLE;
     VmaAllocationInfo staging_info = {};
 
     VkResult result = vmaCreateBuffer(
-    this->allocator,
-    &buffer_create_info,
-    &alloc_info,
-    &staging_buffer,
-    &staging_allocation,
-    &staging_info
+        this->allocator,
+        &buffer_create_info,
+        &alloc_info,
+        &staging_buffer,
+        &staging_allocation,
+        &staging_info
     );
 
     if (result != VK_SUCCESS) {
@@ -461,7 +462,7 @@ bool VMA::staging_image_upload(VkImage dst_image, const void *data, VkDeviceSize
         return false;
     }
 
-        // 拷贝数据
+    // 拷贝数据到 staging buffer
     if (staging_info.pMappedData) {
         memcpy(staging_info.pMappedData, data, size);
         if ((staging_info.memoryType & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) == 0) {
@@ -472,7 +473,7 @@ bool VMA::staging_image_upload(VkImage dst_image, const void *data, VkDeviceSize
         return false;
     }
 
-    // 执行拷贝
+    // 执行拷贝命令
     VkCommandBuffer command_buffer = create_command_buffer(this->device, this->command_pool);
     VkFence fence = this->create_fence();
 
@@ -481,7 +482,8 @@ bool VMA::staging_image_upload(VkImage dst_image, const void *data, VkDeviceSize
     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(command_buffer, &begin_info);
 
-    // 准备图像布局
+    // ========== 修复点 1：正确的布局转换顺序 ==========
+    // 第一步：UNDEFINED -> TRANSFER_DST_OPTIMAL
     VkImageMemoryBarrier barrier = {};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -496,19 +498,19 @@ bool VMA::staging_image_upload(VkImage dst_image, const void *data, VkDeviceSize
     barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
     vkCmdPipelineBarrier(
-    command_buffer,
-    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-    VK_PIPELINE_STAGE_TRANSFER_BIT,
-    0,
-    0, nullptr,
-    0, nullptr,
-    1, &barrier
+        command_buffer,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
     );
 
-    // 拷贝 buffer 到 image
+    // 第二步：拷贝数据
     VkBufferImageCopy region = {};
     region.bufferOffset = 0;
-    region.bufferRowLength = 0;
+    region.bufferRowLength = 0;  // 0 表示紧密排列
     region.bufferImageHeight = 0;
     region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     region.imageSubresource.mipLevel = 0;
@@ -518,32 +520,33 @@ bool VMA::staging_image_upload(VkImage dst_image, const void *data, VkDeviceSize
     region.imageExtent = {info.width, info.height, 1};
 
     vkCmdCopyBufferToImage(
-    command_buffer,
-    staging_buffer,
-    dst_image,
-    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-    1,
-    &region
+        command_buffer,
+        staging_buffer,
+        dst_image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,
+        &region
     );
 
-    // 转换到 shader read 布局
+    // 第三步：TRANSFER_DST_OPTIMAL -> SHADER_READ_ONLY_OPTIMAL
     barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
     vkCmdPipelineBarrier(
-    command_buffer,
-    VK_PIPELINE_STAGE_TRANSFER_BIT,
-    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-    0,
-    0, nullptr,
-    0, nullptr,
-    1, &barrier
+        command_buffer,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
     );
 
     vkEndCommandBuffer(command_buffer);
 
+    // 提交并等待完成
     VkSubmitInfo submit_info = {};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.commandBufferCount = 1;

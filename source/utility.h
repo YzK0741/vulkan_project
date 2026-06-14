@@ -155,5 +155,4 @@ protected:
     }
 };
 
-
 #endif //VULKAN_PROJECT_UTILITY_H`
