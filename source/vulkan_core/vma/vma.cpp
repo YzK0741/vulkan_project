@@ -274,7 +274,7 @@ VkFence VMA::create_fence() const {
     VkFence fence = VK_NULL_HANDLE;
 
     VkFenceCreateInfo fence_create_info = {};
-    fence_create_info.flags = 0;
+    fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     vkCreateFence(this->device, &fence_create_info, nullptr, &fence);
 
     return fence;

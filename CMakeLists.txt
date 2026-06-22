@@ -46,7 +46,7 @@ add_executable(vulkan_project main.cpp
 target_link_libraries(${PROJECT_NAME}
         Vulkan::Vulkan
         glfw
-        mimalloc
+        backtrace
 )
 
 target_compile_options(vulkan_project PRIVATE
@@ -61,6 +61,11 @@ target_compile_options(vulkan_project PRIVATE
         -fno-unwind-tables      # 移除 unwind 表
         -fno-asynchronous-unwind-tables  # 移除异步 unwind
         -fmerge-all-constants  # 合并常量
+        >
+        $<$<CONFIG:Debug>:
+        -g3                    # 最详细的调试信息
+        -fno-omit-frame-pointer  # 保留帧指针
+        -fstandalone-debug     # 独立的调试信息
         >
 )
 
@@ -77,5 +82,6 @@ target_link_options(vulkan_project PRIVATE
 target_compile_definitions(vulkan_project PRIVATE
         $<$<CONFIG:Debug>:
         _DEBUG
+        BOOST_STACK_TRACE_USE_BACKTRACE
         >
 )

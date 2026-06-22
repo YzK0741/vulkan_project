@@ -112,7 +112,7 @@ vec3 CalculatePBR(vec3 albedo, float metallic, float roughness, float ao,
 
     // 漫反射部分
     vec3 kS = F;
-    vec3 kD = vec3(1.0) - kS;
+    vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
     kD *= 1.0 - metallic;
 
     float NdotL = max(dot(N, L), 0.0);
@@ -144,24 +144,28 @@ void main()
     // 初始化输出颜色
     vec3 Lo = vec3(0.0);
 
-    // 计算每个光源的贡献
-    for (int i = 0; i < lightData.numLights; i++)
-    {
-        Light light = lightData.lights[i];
-        vec3 L = normalize(light.position - inWorldPos);
 
-        // 距离衰减
-        float distance = length(light.position - inWorldPos);
-        float attenuation = 1.0 / (distance * distance);
+    Light light;
 
-        // 计算 PBR 光照
-        Lo += CalculatePBR(albedo.rgb, metallic, roughness, ao,
-                           worldNormal, V, L,
-                           light.color, light.intensity * attenuation);
-    }
+    light.intensity = 2.0;
+    light.position = vec3(0.0, 2.0, 0.0);
+    light.color = vec3(1.0);
+
+    vec3 L = normalize(light.position - inWorldPos);
+
+    // 距离衰减
+    float distance = length(light.position - inWorldPos);
+    float attenuation = 1.0 / (distance * distance);
+
+    // 计算 PBR 光照
+    Lo += CalculatePBR(albedo.rgb, metallic, roughness, ao,
+                       worldNormal, V, L,
+                       light.color, light.intensity * attenuation);
+
+
 
     // 环境光照 (简化的 IBL)
-    vec3 ambient = albedo.rgb * 0.03 * ao;
+    vec3 ambient = albedo.rgb * 0.05 * ao;
 
     vec3 color = ambient + Lo;
 

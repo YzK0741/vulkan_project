@@ -12,6 +12,39 @@
 #include <filesystem>
 #include <ranges>
 
+tinygltf::Model load_model(std::string_view path) {
+    std::filesystem::path filepath;
+
+    if (!std::filesystem::exists(path)) {
+        std::println("file {} does not exist", path);
+        print_stacktrace_and_terminate();
+    }
+
+    tinygltf::Model model;
+    tinygltf::TinyGLTF loader;
+    std::string err, warn;
+    bool success = false;
+    if (path.ends_with("glb")) {
+        success = loader.LoadBinaryFromFile(&model, &err, &warn, path.data());
+    } else if (path.ends_with("gltf")) {
+        success = loader.LoadASCIIFromFile(&model, &err, &warn, path.data());
+    } else {
+        std::println(stderr, "wrong name! name does no ends with 'glb' or 'gltf'");
+        std::println("file path: {}", path);
+        print_stacktrace_and_terminate();
+    }
+    if (!warn.empty())
+        std::println(stderr, "gltf loading warn: {}", warn);
+    if (!err.empty())
+        std::println(stderr, "gltf loading error: {}", err);
+
+    if (!success){
+        std::println(stderr, "failed load model");
+        print_stacktrace_and_terminate();
+    }
+    return model;
+}
+
 template<typename T>
 std::vector<T> get_accessor_data(const tinygltf::Model& model, int accessor_index) {
     const auto& accessor = model.accessors[accessor_index];
@@ -212,37 +245,7 @@ std::vector<gltf_data> process_gltf_model(const tinygltf::Model& model) {
 }
 
 std::vector<gltf_data> load_gltf(const std::string_view path) {
-    std::filesystem::path filepath;
-
-    if (!std::filesystem::exists(path)) {
-        std::println("file {} does not exist", path);
-    }
-
-    tinygltf::Model model;
-    tinygltf::TinyGLTF loader;
-    std::string err, warn;
-    bool success = false;
-    if (path.ends_with("glb")) {
-        success = loader.LoadBinaryFromFile(&model, &err, &warn, path.data());
-    } else if (path.ends_with("gltf")) {
-        success = loader.LoadASCIIFromFile(&model, &err, &warn, path.data());
-    } else {
-        std::println(stderr, "wrong name! name does no ends with 'glb' or 'gltf'");
-        std::println("file path: {}", path);
-        print_stacktrace_and_terminate();
-    }
-    if (!warn.empty())
-        std::println(stderr, "gltf loading warn: {}", warn);
-    if (!err.empty())
-        std::println(stderr, "gltf loading error: {}", err);
-
-    if (!success){
-        std::println(stderr, "failed load model");
-        print_stacktrace_and_terminate();
-    }
-
-    std::println("加载模型成功");
-
+    const auto model = load_model(path);
     return process_gltf_model(model);
 }
 
@@ -353,36 +356,7 @@ void print_texture_info(const tinygltf::Model& model) {
 
 void print_model_info(const std::string_view path) {
 
-    if (!std::filesystem::exists(path)) {
-        std::println(stderr, "file {} does not exist", path);
-        print_stacktrace_and_terminate();  // 或 return
-    }
-
-    tinygltf::Model model;
-    tinygltf::TinyGLTF loader;
-    std::string err, warn;
-    bool success = false;
-
-    std::string ext = std::filesystem::path(path).extension().string();
-    std::ranges::transform(ext, ext.begin(), ::tolower);
-
-    if (ext == ".glb") {
-        success = loader.LoadBinaryFromFile(&model, &err, &warn, path.data());
-    } else if (ext == ".gltf") {
-        success = loader.LoadASCIIFromFile(&model, &err, &warn, path.data());
-    } else {
-        std::println(stderr, "wrong name! file does not end with '.glb' or '.gltf'");
-        print_stacktrace_and_terminate();
-    }
-
-    if (!warn.empty()) std::println(stderr, "gltf loading warn: {}", warn);
-    if (!err.empty()) std::println(stderr, "gltf loading error: {}", err);
-    if (!success) {
-        std::println(stderr, "failed load model");
-        print_stacktrace_and_terminate();
-    }
-
-
+    auto model = load_model(path);
 
     std::println("========/ model {} data:", path);
 
@@ -393,4 +367,240 @@ void print_model_info(const std::string_view path) {
 
     print_mesh_info(model);
     print_texture_info(model);
+}
+
+// 在 gltf_parser.cpp 中添加以下函数
+
+// 提取PBR材质参数
+// 在 extract_pbr_material_params 函数中修改
+void extract_pbr_material_params(const tinygltf::Model& model, int material_index,
+                                  pbr_gltf_data& pbr_data) {
+    if (material_index < 0 || material_index >= model.materials.size()) {
+        pbr_data.baseColorFactor = glm::vec4(1.0f);
+        pbr_data.metallicFactor = 1.0f;
+        pbr_data.roughnessFactor = 0.5f;
+        return;
+    }
+
+    const tinygltf::Material& material = model.materials[material_index];
+    const auto& pbr = material.pbrMetallicRoughness;
+
+    // 提取 baseColorFactor
+    if (pbr.baseColorFactor.size() >= 4) {
+        pbr_data.baseColorFactor = glm::vec4(
+            static_cast<float>(pbr.baseColorFactor[0]),
+            static_cast<float>(pbr.baseColorFactor[1]),
+            static_cast<float>(pbr.baseColorFactor[2]),
+            static_cast<float>(pbr.baseColorFactor[3])
+        );
+    } else {
+        pbr_data.baseColorFactor = glm::vec4(1.0f);
+    }
+
+    pbr_data.metallicFactor = static_cast<float>(pbr.metallicFactor);
+    pbr_data.roughnessFactor = static_cast<float>(pbr.roughnessFactor);
+
+    // 清空 textures map
+    pbr_data.textures.clear();
+
+    // 辅助函数：加载纹理，避免重复
+    auto load_texture = [&](const int texture_index, const std::string& tex_name, bool required = false) {
+        // 检查纹理是否已经加载
+        if (pbr_data.textures.contains(tex_name)) {
+            return;  // 已加载，跳过
+        }
+
+        if (texture_index >= 0 && texture_index < model.textures.size()) {
+            const tinygltf::Texture& texture = model.textures[texture_index];
+            if (texture.source >= 0 && texture.source < model.images.size()) {
+                const tinygltf::Image& image = model.images[texture.source];
+
+                pbr_texture pbr_tex;
+                pbr_tex.texture_data = image.image;
+                pbr_tex.width = image.width;
+                pbr_tex.height = image.height;
+
+                if (tex_name == "ALBEDO") {
+                    pbr_tex.format = VK_FORMAT_R8G8B8A8_SRGB;   // 颜色贴图用 sRGB
+                } else {
+                    pbr_tex.format = VK_FORMAT_R8G8B8A8_UNORM;  // 其他用线性
+                }
+
+                pbr_data.textures[tex_name] = std::move(pbr_tex);
+
+                std::println("加载PBR纹理成功: {} ({}x{}, index={})",
+                            tex_name, image.width, image.height, texture_index);
+            } else {
+                if (required) {
+                    std::println("警告: 纹理 {} 的 source 无效", tex_name);
+                }
+            }
+        } else {
+            if (required) {
+                std::println("警告: 纹理 {} 的索引无效: {}", tex_name, texture_index);
+            }
+        }
+    };
+
+    // 按顺序加载各个纹理（确保使用正确的索引）
+    load_texture(pbr.baseColorTexture.index, "ALBEDO", true);
+    load_texture(pbr.metallicRoughnessTexture.index, "ROUGHNESS", true);
+
+    // 法线贴图可能有单独的纹理
+    if (material.normalTexture.index >= 0) {
+        load_texture(material.normalTexture.index, "NORMAL", false);
+    }
+
+    // AO 贴图可能有单独的纹理
+    if (material.occlusionTexture.index >= 0) {
+        load_texture(material.occlusionTexture.index, "OCCLUSION", false);
+    }
+
+    // 调试输出
+    std::println("材质 {} 加载的纹理:", material.name.empty() ? "unnamed" : material.name);
+    for (const auto& [name, tex] : pbr_data.textures) {
+        std::println("  - {}: {}x{}", name, tex.width, tex.height);
+    }
+}
+
+// 加载PBR GLTF模型
+std::vector<pbr_gltf_data> load_pbr_gltf(std::string_view path) {
+    const auto model = load_model(path);
+    std::vector<pbr_gltf_data> pbr_meshes_data;
+
+    for (const auto& mesh : model.meshes) {
+        for (const auto& primitive : mesh.primitives) {
+            pbr_gltf_data pbr_data;
+
+            // 1. 检查是否有位置数据
+            if (!primitive.attributes.contains("POSITION")) {
+                std::println("警告: 图元缺少位置数据");
+                continue;
+            }
+
+            // 2. 提取顶点数据
+            std::vector<glm::vec3> positions;
+            std::vector<glm::vec3> normals;
+            std::vector<glm::vec2> tex_coords;
+            std::vector<glm::vec3> tangents;  // 切线空间，用于法线贴图
+            // 读取位置
+            if (primitive.attributes.contains("POSITION")) {
+                auto pos_data = get_accessor_data<float>(model, primitive.attributes.at("POSITION"));
+                for (size_t i = 0; i < pos_data.size(); i += 3) {
+                    positions.emplace_back(pos_data[i], pos_data[i + 1], pos_data[i + 2]);
+                }
+            }
+
+            // 读取法线
+            if (primitive.attributes.contains("NORMAL")) {
+                auto normal_data = get_accessor_data<float>(model, primitive.attributes.at("NORMAL"));
+                for (size_t i = 0; i < normal_data.size(); i += 3) {
+                    normals.emplace_back(normal_data[i], normal_data[i + 1], normal_data[i + 2]);
+                }
+            }
+
+            // 读取纹理坐标
+            if (primitive.attributes.contains("TEXCOORD_0")) {
+                auto tex_data = get_accessor_data<float>(model, primitive.attributes.at("TEXCOORD_0"));
+                for (size_t i = 0; i < tex_data.size(); i += 2) {
+                    tex_coords.emplace_back(tex_data[i], tex_data[i + 1]);
+                }
+            }
+
+            // 读取切线（如果存在，用于法线贴图）
+            if (primitive.attributes.contains("TANGENT")) {
+                auto tangent_data = get_accessor_data<float>(model, primitive.attributes.at("TANGENT"));
+                for (size_t i = 0; i < tangent_data.size(); i += 4) {
+                    // 切线是 vec4，w 分量表示方向
+                    tangents.emplace_back(tangent_data[i], tangent_data[i + 1], tangent_data[i + 2]);
+                }
+            }
+
+            // 3. 构建PBR顶点数组
+            pbr_data.model.vertices.resize(positions.size());
+            for (size_t i = 0; i < positions.size(); ++i) {
+                pbr_data.model.vertices[i].position = positions[i];
+                pbr_data.model.vertices[i].normal = i < normals.size() ? normals[i] : glm::vec3(0.0f, 1.0f, 0.0f);
+                pbr_data.model.vertices[i].uv = i < tex_coords.size() ? tex_coords[i] : glm::vec2(0.0f);
+                pbr_data.model.vertices[i].tangent = i < tangents.size() ? tangents[i] : glm::vec3(1.0f, 0.0f, 0.0f);
+            }
+
+            // 4. 处理索引
+            if (primitive.indices >= 0) {
+                if (const auto& index_accessor = model.accessors[primitive.indices]; index_accessor.bufferView < 0) {
+                    // 生成顺序索引
+                    pbr_data.model.indices.resize(pbr_data.model.vertices.size());
+                    for (size_t i = 0; i < pbr_data.model.vertices.size(); ++i) {
+                        pbr_data.model.indices[i] = static_cast<uint32_t>(i);
+                    }
+                } else {
+                    const auto& index_buffer_view = model.bufferViews[index_accessor.bufferView];
+                    const auto& index_buffer = model.buffers[index_buffer_view.buffer];
+                    const uint8_t* index_ptr = index_buffer.data.data() +
+                        index_buffer_view.byteOffset + index_accessor.byteOffset;
+
+                    pbr_data.model.indices.resize(index_accessor.count);
+
+                    switch (index_accessor.componentType) {
+                        case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: {
+                            const auto* indices8 = reinterpret_cast<const uint8_t*>(index_ptr);
+                            for (size_t i = 0; i < index_accessor.count; ++i) {
+                                pbr_data.model.indices[i] = indices8[i];
+                            }
+                            break;
+                        }
+                        case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: {
+                            const auto* indices16 = reinterpret_cast<const uint16_t*>(index_ptr);
+                            for (size_t i = 0; i < index_accessor.count; ++i) {
+                                pbr_data.model.indices[i] = indices16[i];
+                            }
+                            break;
+                        }
+                        case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT: {
+                            const auto* indices32 = reinterpret_cast<const uint32_t*>(index_ptr);
+                            for (size_t i = 0; i < index_accessor.count; ++i) {
+                                pbr_data.model.indices[i] = indices32[i];
+                            }
+                            break;
+                        }
+                        default: {
+                            pbr_data.model.indices.resize(pbr_data.model.vertices.size());
+                            for (size_t i = 0; i < pbr_data.model.vertices.size(); ++i) {
+                                pbr_data.model.indices[i] = static_cast<uint32_t>(i);
+                            }
+                            break;
+                        }
+                    }
+                }
+            } else {
+                // 没有索引，生成顺序索引
+                pbr_data.model.indices.resize(pbr_data.model.vertices.size());
+                for (size_t i = 0; i < pbr_data.model.vertices.size(); ++i) {
+                    pbr_data.model.indices[i] = static_cast<uint32_t>(i);
+                }
+            }
+
+            // 5. 提取PBR材质参数
+            if (primitive.material >= 0) {
+                extract_pbr_material_params(model, primitive.material, pbr_data);
+            } else {
+                // 默认PBR参数
+                pbr_data.baseColorFactor = glm::vec4(1.0f);
+                pbr_data.metallicFactor = 1.0f;
+                pbr_data.roughnessFactor = 0.5f;
+            }
+
+            std::println("PBR图元加载完成: {} 顶点, {} 索引",
+                        pbr_data.model.vertices.size(),
+                        pbr_data.model.indices.size());
+            pbr_meshes_data.push_back(std::move(pbr_data));
+        }
+    }
+
+    return pbr_meshes_data;
+}
+
+// 异步加载PBR GLTF模型
+std::future<std::vector<pbr_gltf_data>> load_pbr_gltf_async(std::string_view path) {
+    return std::async(std::launch::async, load_pbr_gltf, path);
 }

@@ -7,7 +7,9 @@
 
 #include <future>
 #include <string_view>
+#include <map>
 #include "../vulkan_runtime/module.h"
+
 
 struct gltf_data {
     model_data model;
@@ -16,10 +18,21 @@ struct gltf_data {
     VkFormat texture_format;
 };
 
+struct pbr_gltf_data {
+    pbr_model_data model;
+    std::map<std::string, pbr_texture> textures;
+    glm::vec4 baseColorFactor;
+    float metallicFactor;
+    float roughnessFactor;
+};
+
 void print_model_info(std::string_view path);
 
 std::vector<gltf_data> load_gltf(std::string_view path);
 
 std::future<std::vector<gltf_data>> load_gltf_async(std::string_view path);
+
+std::vector<pbr_gltf_data> load_pbr_gltf(std::string_view path);
+std::future<std::vector<pbr_gltf_data>> load_pbr_gltf_async(std::string_view path);
 
 #endif //VULKAN_PROJECT_GLTF_PARSER_H

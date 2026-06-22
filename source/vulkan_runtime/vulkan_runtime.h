@@ -16,6 +16,8 @@
 #include "../vulkan_core/vulkan_utility.h"
 #include "../loader/png_loader.h"
 #include "../vulkan_core/vulkan_buffer.h"
+#include "../vulkan_core/basic_pbr.h"
+#include "module.h"
 
 namespace vulkan_runtime {
 
@@ -476,6 +478,7 @@ namespace vulkan_runtime {
     class runtime {
         core core;
         std::vector<vulkan_renderable_object> objects;
+        std::vector<basic_pbr::renderable_object> pbr_objects;
         vertex_buffer_creator creator;
         buffer_resource vertex_buffer;
         buffer_resource index_buffer;
@@ -550,6 +553,8 @@ namespace vulkan_runtime {
             int height = 0,
             VkFormat format = VK_FORMAT_UNDEFINED
             );
+
+        void add_object_pbr(std::span<basic_pbr::vertex> vertices, std::span<uint32_t> indices, const std::map<std::string, pbr_texture> &textures);
 
         void render_frame();
 

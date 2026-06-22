@@ -8,6 +8,7 @@
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
 #include <stb/stb_image.h>
+#include <print>
 #include "../utility.h"
 
 uint32_t find_memory_type(const uint32_t& type_filter, const VkMemoryPropertyFlags& properties, const VkPhysicalDevice& physical_device);

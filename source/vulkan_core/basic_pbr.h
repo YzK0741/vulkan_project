@@ -7,6 +7,8 @@
 
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
+#include <map>
+#include <string>
 
 namespace basic_pbr {
     struct vertex {
@@ -85,6 +87,174 @@ namespace basic_pbr {
 
     VkDescriptorSetLayout create_set0_layout(VkDevice device);
     VkDescriptorSetLayout create_set1_layout(VkDevice device);
+
+    struct texture {
+        long image_handler;
+        VkImageView image_view;
+        VkSampler sampler;
+    };
+
+    struct renderable_object {
+        VkDescriptorSet set0;
+        VkDescriptorSet set1;
+        std::map<std::string, texture> textures;
+        VkBuffer vertex_buffer;
+        VkBuffer index_buffer;
+        uint32_t index_count;
+        MaterialPC material_pc;
+        UBO ubo;
+        VkBuffer ubo_buffer;
+        LightUBO light_ubo;
+        VkBuffer light_ubo_buffer;
+        void draw(const VkCommandBuffer cmd,
+          const VkPipelineLayout pipeline_layout,
+          const VkShaderStageFlags push_constant_stages = VK_SHADER_STAGE_FRAGMENT_BIT) const {
+            // 验证
+            if (index_count == 0 || vertex_buffer == VK_NULL_HANDLE) return;
+
+            const std::array<VkDescriptorSet, 2> sets = {set0, set1};
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                  pipeline_layout, 0, 2, sets.data(), 0, nullptr);
+            vkCmdPushConstants(cmd, pipeline_layout,
+                              push_constant_stages,
+                              0, sizeof(material_pc), &material_pc);
+
+            constexpr VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(cmd, 0, 1, &vertex_buffer, offsets);
+            vkCmdBindIndexBuffer(cmd, index_buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(cmd, index_count, 1, 0, 0, 0);
+        }
+
+        void bind_set0(const VkDevice device, const VkDescriptorPool descriptor_pool,
+                       const VkDescriptorSetLayout set0_layout) {
+            VkDescriptorSetAllocateInfo allocInfo{};
+            allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            allocInfo.descriptorPool = descriptor_pool;
+            allocInfo.descriptorSetCount = 1;
+            allocInfo.pSetLayouts = &set0_layout;
+
+            vkAllocateDescriptorSets(device, &allocInfo, &this->set0);
+
+            std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
+
+            // UBO buffer (binding 0)
+            VkDescriptorBufferInfo uboBufferInfo{};
+            uboBufferInfo.buffer = ubo_buffer;
+            uboBufferInfo.range = VK_WHOLE_SIZE;
+            uboBufferInfo.offset = 0;
+
+            descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[0].dstSet = this->set0;
+            descriptorWrites[0].dstBinding = 0;
+            descriptorWrites[0].dstArrayElement = 0;
+            descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrites[0].descriptorCount = 1;
+            descriptorWrites[0].pBufferInfo = &uboBufferInfo;
+
+            // Light UBO buffer (binding 1)
+            VkDescriptorBufferInfo lightBufferInfo{};
+            lightBufferInfo.buffer = light_ubo_buffer;
+            lightBufferInfo.range = VK_WHOLE_SIZE;
+            lightBufferInfo.offset = 0;
+
+            descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[1].dstSet = this->set0;
+            descriptorWrites[1].dstBinding = 1;
+            descriptorWrites[1].dstArrayElement = 0;
+            descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrites[1].descriptorCount = 1;
+            descriptorWrites[1].pBufferInfo = &lightBufferInfo;
+
+            vkUpdateDescriptorSets(device, descriptorWrites.size(),
+                                   descriptorWrites.data(), 0, nullptr);
+        }
+
+        void bind_set1(const VkDevice device, const VkDescriptorPool descriptor_pool,
+                       const VkDescriptorSetLayout set1_layout) {
+            VkDescriptorSetAllocateInfo allocInfo{};
+            allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            allocInfo.descriptorPool = descriptor_pool;
+            allocInfo.descriptorSetCount = 1;
+            allocInfo.pSetLayouts = &set1_layout;
+
+            vkAllocateDescriptorSets(device, &allocInfo, &set1);
+            // 获取纹理
+            const auto& albedo_tex = textures.at("ALBEDO");
+            const auto& normal_tex = textures.at("NORMAL");
+            const auto& roughness_tex = textures.at("ROUGHNESS");
+            const auto& occlusion_tex = textures.at("OCCLUSION");
+
+            std::array<VkWriteDescriptorSet, 4> descriptorWrites{};
+
+            // Albedo Map (binding 0)
+            VkDescriptorImageInfo albedoImageInfo{};
+            albedoImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            albedoImageInfo.imageView = albedo_tex.image_view;
+            albedoImageInfo.sampler = albedo_tex.sampler;
+
+            descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[0].dstSet = set1;
+            descriptorWrites[0].dstBinding = 0;
+            descriptorWrites[0].dstArrayElement = 0;
+            descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[0].descriptorCount = 1;
+            descriptorWrites[0].pImageInfo = &albedoImageInfo;
+
+            // Normal Map (binding 1)
+            VkDescriptorImageInfo normalImageInfo{};
+            normalImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            normalImageInfo.imageView = normal_tex.image_view;
+            normalImageInfo.sampler = normal_tex.sampler;
+
+            descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[1].dstSet = set1;
+            descriptorWrites[1].dstBinding = 1;
+            descriptorWrites[1].dstArrayElement = 0;
+            descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[1].descriptorCount = 1;
+            descriptorWrites[1].pImageInfo = &normalImageInfo;
+
+            // MetallicRoughness Map (binding 2)
+            VkDescriptorImageInfo roughnessImageInfo{};
+            roughnessImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            roughnessImageInfo.imageView = roughness_tex.image_view;
+            roughnessImageInfo.sampler = roughness_tex.sampler;
+
+            descriptorWrites[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[2].dstSet = set1;
+            descriptorWrites[2].dstBinding = 2;
+            descriptorWrites[2].dstArrayElement = 0;
+            descriptorWrites[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[2].descriptorCount = 1;
+            descriptorWrites[2].pImageInfo = &roughnessImageInfo;
+
+            // AO Map (binding 3)
+            VkDescriptorImageInfo aoImageInfo{};
+            aoImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            aoImageInfo.imageView = occlusion_tex.image_view;
+            aoImageInfo.sampler = occlusion_tex.sampler;
+
+            descriptorWrites[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[3].dstSet = set1;
+            descriptorWrites[3].dstBinding = 3;
+            descriptorWrites[3].dstArrayElement = 0;
+            descriptorWrites[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[3].descriptorCount = 1;
+            descriptorWrites[3].pImageInfo = &aoImageInfo;
+
+            vkUpdateDescriptorSets(device, static_cast<uint32_t>(descriptorWrites.size()),
+                                   descriptorWrites.data(), 0, nullptr);
+        }
+
+        // 便捷函数：同时绑定 set0 和 set1
+        void bind_descriptor_sets(const VkDevice device, const VkDescriptorPool descriptor_pool,
+                                  const VkDescriptorSetLayout set0_layout,
+                                  const VkDescriptorSetLayout set1_layout) {
+            bind_set0(device, descriptor_pool, set0_layout);
+            bind_set1(device, descriptor_pool, set1_layout);
+        }
+
+    };
 
 } // base_pbr
 

@@ -3,6 +3,7 @@
 //
 
 #include <expected>
+#include "module.h"
 #include "../shaders/shaders.h"
 #include "../vulkan_core/vulkan_core.h"
 #include "vulkan_runtime.h"
@@ -303,6 +304,13 @@ namespace vulkan_runtime {
             depth_stencil.depthBoundsTestEnable = VK_FALSE;
             depth_stencil.stencilTestEnable = VK_FALSE;
 
+
+            VkDynamicState states[] = {VK_DYNAMIC_STATE_VIEWPORT , VK_DYNAMIC_STATE_SCISSOR};
+
+            VkPipelineDynamicStateCreateInfo pipeline_dynamic_state_create_info = {};
+            pipeline_dynamic_state_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+            pipeline_dynamic_state_create_info.dynamicStateCount = 2;
+            pipeline_dynamic_state_create_info.pDynamicStates = states;
             // 创建管线
             VkGraphicsPipelineCreateInfo pipeline_info = {};
             pipeline_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -317,6 +325,7 @@ namespace vulkan_runtime {
             pipeline_info.pDepthStencilState = &depth_stencil;
             pipeline_info.layout = pipeline_layout;
             pipeline_info.renderPass = core.renderpass;
+            pipeline_info.pDynamicState = &pipeline_dynamic_state_create_info;
             pipeline_info.subpass = 0;
             pipeline_info.basePipelineHandle = VK_NULL_HANDLE;
 
@@ -465,6 +474,14 @@ namespace vulkan_runtime {
             depth_stencil.depthBoundsTestEnable = VK_FALSE;
             depth_stencil.stencilTestEnable = VK_FALSE;
 
+            VkDynamicState states[] = {VK_DYNAMIC_STATE_VIEWPORT , VK_DYNAMIC_STATE_SCISSOR};
+
+            VkPipelineDynamicStateCreateInfo state_create_info;
+            state_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+            state_create_info.dynamicStateCount = 2;
+            state_create_info.pDynamicStates = states;
+            state_create_info.flags = 0;
+
             // 创建管线
             VkGraphicsPipelineCreateInfo pipeline_info = {};
             pipeline_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -480,6 +497,7 @@ namespace vulkan_runtime {
             pipeline_info.layout = pbr_pipeline_layout;
             pipeline_info.renderPass = core.renderpass;
             pipeline_info.subpass = 0;
+            pipeline_info.pDynamicState = &state_create_info;
             pipeline_info.basePipelineHandle = VK_NULL_HANDLE;
 
         VkPipeline pipeline = VK_NULL_HANDLE;
@@ -607,6 +625,89 @@ namespace vulkan_runtime {
 
 
         return this->add_object(positions, normals, tex_coords, indexes, "");
+    }
+
+    void runtime::add_object_pbr(const std::span<basic_pbr::vertex> vertices, const std::span<uint32_t> indices, const std::map<std::string, pbr_texture> &
+                                 textures) {
+        basic_pbr::renderable_object object;
+
+        const auto vertex_buffer_handler = this->core.vma.create_buffer_with_data(vertices, VMA::buffer_type::vertex);
+        object.vertex_buffer = this->core.vma.get_buffer(vertex_buffer_handler).buffer;
+        const auto index_buffer_handler = this->core.vma.create_buffer_with_data(indices, VMA::buffer_type::index);
+        object.index_buffer = this->core.vma.get_buffer(index_buffer_handler).buffer;
+        object.index_count = indices.size();
+
+        auto make_image = [&, this](const std::string &name) {
+            VMA::image_info info = {};
+            info.height = textures.at(name).height;
+            info.width = textures.at(name).width;
+            info.format = textures.at(name).format;
+            info.mip_levels = 1;
+            // ✅ 根据纹理类型选择不同的 image_type
+            VMA::image_type img_type;
+            if (name == "ALBEDO") {
+                // Albedo 是颜色纹理，需要 sRGB 格式
+                img_type = VMA::image_type::texture_2d_color;  // 如果是 sRGB 格式
+                // 或者使用 texture_2d（如果已经是线性空间）
+            }
+            else {
+                img_type = VMA::image_type::texture_2d;  // 默认
+            }
+            const auto handler = this->core.vma.create_image_with_data(std::span(textures.at(name).texture_data), info, img_type);
+            const VkImage image = this->core.vma.get_image(handler).image;
+            const VkImageView view = create_image_view(this->core.device, image, textures.at(name).format, VK_IMAGE_ASPECT_COLOR_BIT);
+            VkSamplerCreateInfo sampler_create_info = {};
+            sampler_create_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+            sampler_create_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            sampler_create_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            sampler_create_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            sampler_create_info.compareEnable = VK_FALSE;
+            sampler_create_info.magFilter = VK_FILTER_LINEAR;
+            sampler_create_info.minFilter = VK_FILTER_LINEAR;
+            sampler_create_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+            sampler_create_info.minLod = 0.0f;
+            sampler_create_info.maxLod = 1.0f;
+            VkSampler sampler;
+            vkCreateSampler(this->core.device, &sampler_create_info,nullptr, &sampler);
+            object.textures[name] = {handler, view, sampler};
+        };
+
+        make_image("ALBEDO");
+        make_image("OCCLUSION");
+        make_image("NORMAL");
+        make_image("ROUGHNESS");
+
+        object.ubo.model = glm::mat4(1.0f);
+        object.ubo.model = glm::scale(object.ubo.model, glm::vec3(1.0,  1.0, 1.0));  // 缩放
+        object.ubo.camPos = glm::vec3(2.0f, 2.0f, 2.0f);
+        object.ubo.projection = glm::perspective(
+                glm::radians(60.0f),  // 视野角度
+                static_cast<float>(core.swap_chain_extent.width) /
+                            static_cast<float>(core.swap_chain_extent.height),
+                0.1f,    // 近平面
+                100.0f   // 远平面
+            );
+        object.ubo.view = glm::lookAt(
+        glm::vec3(2.0f, 2.0f, 2.0f),  // 相机位置
+        glm::vec3(0.0f, 0.0f, 0.0f),  // 看向原点
+        glm::vec3(0.0f, 0.0f, 1.0f)   // 上方向
+    );
+
+        object.ubo.projection[1][1] *= -1;
+
+        object.light_ubo.numLights = 1;
+        object.light_ubo.lights[0].color = glm::vec3(1.0, 1.0, 1.0);
+        object.light_ubo.lights[0].position = glm::vec3(3.0, 1.0, 1.0);
+        object.light_ubo.lights[0].intensity = 5.0;
+
+        const auto ubo_buffer = this->core.vma.create_buffer_with_data(std::span(&object.ubo, 1), VMA::buffer_type::uniform_coherent);
+        object.ubo_buffer = this->core.vma.get_buffer(ubo_buffer).buffer;
+        const auto light_ubo_buffer = this->core.vma.create_buffer_with_data(std::span(&object.light_ubo, 1), VMA::buffer_type::uniform_coherent);
+        object.light_ubo_buffer = this->core.vma.get_buffer(light_ubo_buffer).buffer;
+
+        object.bind_descriptor_sets(this->core.device, this->core.descriptor_pool, this->core.descriptor_set_layout_pbr[0], this->core.descriptor_set_layout_pbr[1]);
+
+        this->pbr_objects.push_back(object);
     }
 
     void runtime::render_frame() {
@@ -1104,6 +1205,15 @@ namespace vulkan_runtime {
                              static_cast<uint32_t>(mesh.get_vertex_count()),
                              1, 0, 0);
                 }
+            }
+
+            vkCmdBindPipeline(cmd_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pbr_graphics_pipeline);
+
+            vkCmdSetViewport(cmd_buffer, 0, 1, &viewport);
+            vkCmdSetScissor(cmd_buffer, 0, 1, &scissor);
+
+            for (const auto& object : this->pbr_objects) {
+                object.draw(cmd_buffer, pbr_pipeline_layout);
             }
 
 

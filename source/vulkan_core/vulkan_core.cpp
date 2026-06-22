@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <limits>
 #include <algorithm>
+#include <boost/stacktrace/stacktrace.hpp>
 #include "basic_pbr.h"
 #include "vulkan_core.h"
 
@@ -23,8 +24,14 @@ namespace vulkan_core {
         // 根据严重程度添加前缀
         std::string_view prefix;
         if (message_severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) {
+            std::print("\nthis is the stacktrace \n{}",
+                boost::stacktrace::to_string(boost::stacktrace::stacktrace())
+            );
             prefix = "[ERROR]";
         } else if (message_severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
+            std::print("\nthis is the stacktrace \n{}",
+                boost::stacktrace::to_string(boost::stacktrace::stacktrace())
+            );
             prefix = "[WARNING]";
         } else if (message_severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT) {
             prefix = "[INFO]";
@@ -32,7 +39,9 @@ namespace vulkan_core {
             prefix = "[VERBOSE]";
         }
 
-        std::println("{} {}", prefix, callback_data->pMessage);
+
+
+        std::println("\n{} {}", prefix, callback_data->pMessage);
 
         return VK_FALSE;  // 返回 VK_FALSE 表示不中止程序
     }
@@ -337,8 +346,8 @@ namespace vulkan_core {
 
     VkPresentModeKHR choose_swap_present_mode(const std::vector<VkPresentModeKHR>& available_present_modes) {
 
-        if (std::ranges::find(available_present_modes, VK_PRESENT_MODE_MAILBOX_KHR) != available_present_modes.end())
-            return VK_PRESENT_MODE_MAILBOX_KHR;
+        if (std::ranges::find(available_present_modes, VK_PRESENT_MODE_FIFO_KHR) != available_present_modes.end())
+            return VK_PRESENT_MODE_FIFO_KHR;
 
         return VK_PRESENT_MODE_FIFO_KHR;
     }
@@ -621,7 +630,7 @@ namespace vulkan_core {
             app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
             app_info.apiVersion = VK_API_VERSION_1_3;
 
-            VkInstanceCreateInfo create_info{};
+            VkInstanceCreateInfo create_info = {};
             create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
             create_info.pApplicationInfo = &app_info;
 
@@ -638,7 +647,7 @@ namespace vulkan_core {
 #endif
 
             // 输出所有扩展
-            std::cout << "请求的实例扩展 (" << extensions.size() << "):" << std::endl;
+            std::println("请求的实例扩展 ({}):",extensions.size());
             for (const auto& ext : extensions) {
                 std::println("  - {}", ext);
             }
@@ -662,7 +671,7 @@ namespace vulkan_core {
                     std::println("  - {}", layer);
                 }
             } else {
-                std::cout << "警告：验证层不可用，继续运行" << std::endl;
+                std::println("警告：验证层不可用，继续运行");
                 create_info.enabledLayerCount = 0;
             }
 #else

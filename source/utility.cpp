@@ -3,7 +3,6 @@
 //
 
 #include <print>
-#define BOOST_STACKTRACE_USE_WINDBUG
 #include <boost/stacktrace/stacktrace.hpp>
 #include "utility.h"
 

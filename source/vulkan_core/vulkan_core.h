@@ -9,9 +9,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
-#include <iostream>
 #include <span>
-#include <fstream>
 #include <vector>
 
 #include "create_info.h"
